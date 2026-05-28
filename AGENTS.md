@@ -16,7 +16,7 @@ Every topic should help a reader answer three questions:
 
 Write for engineers who already know basic backend development, but may not yet have a strong mental model for performance, concurrency, scaling, reliability, and operational tradeoffs.
 
-Prefer clear Chinese explanations with English names for files, directories, commands, APIs, and technical terms that are commonly used in code.
+Prefer clear English explanations. Keep filenames, directory names, commands, APIs, and common technical terms in their original code-oriented form.
 
 ## Content Shape
 

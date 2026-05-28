@@ -1,80 +1,151 @@
 # Go sync map
 
-这个主题用实验理解 Go 里几种并发 map 方案的差异。
+This topic uses a small experiment to compare several concurrent map strategies in Go: `map + sync.Mutex`, `map + sync.RWMutex`, `sync.Map`, and a sharded map.
 
-## 问题背景
+## Problem Background
 
-假设一个服务需要在内存中维护一份共享状态，例如：
+Suppose a service needs to maintain shared in-memory state:
 
-- 用户会话
-- 热点配置
-- 本地缓存
-- 指标计数
-- 任务状态
+- User sessions.
+- Hot configuration.
+- Local cache entries.
+- Metric counters.
+- Task states.
 
-多个 goroutine 会同时读取和修改这份数据。普通 `map` 不能并发读写，所以我们需要选择一种并发安全的方案。
+Multiple goroutines may read and modify this state at the same time. A plain `map` is not safe for concurrent reads and writes, so we need a concurrency-safe strategy.
 
-## 常见方案
+The intuitive first choices are often:
 
-- `map + sync.Mutex`
-- `map + sync.RWMutex`
-- `sync.Map`
-- 分片 map，也就是 shard map
+- Protect a regular `map` with a lock.
+- Replace it with `sync.Map`, because it looks like "the concurrent map."
 
-这些方案没有绝对好坏，它们适合的访问模式不同。
+The catch is that "concurrency-safe" only means the program will not crash because of concurrent map access. It does not mean the choice is faster, simpler, or more maintainable under every access pattern.
 
-## 通俗类比
+## Common Options
 
-可以把共享 map 想象成一个公共登记本。
+| Option | Core idea | Useful question |
+| --- | --- | --- |
+| `map + sync.Mutex` | All reads and writes share one exclusive lock. | Is the simplest solution good enough when the critical section is short and concurrency is low? |
+| `map + sync.RWMutex` | Reads share a read lock; writes take an exclusive lock. | Does the read lock reduce waiting in read-heavy workloads? |
+| `sync.Map` | The standard library concurrent map optimized for specific access patterns. | Does it help when keys are relatively stable and reads dominate writes? |
+| Sharded map | Spread keys across multiple locks. | Does sharding reduce contention when keys are well distributed? |
 
-- `Mutex` 像是登记本旁边只有一支笔，任何人读写都要先拿到笔。
-- `RWMutex` 像是允许多人同时看登记本，但有人修改时所有人都要等。
-- `sync.Map` 像是为读多写少的情况做了特殊布置，常读的数据能更快被看到，但写入和迁移有自己的成本。
-- 分片 map 像是把登记本拆成多个柜台，不同 key 去不同柜台排队。
+None of these options is universally better. They fit different access patterns.
 
-## 实验计划
+## Mental Model
 
-后续 benchmark 会比较这些场景：
+Think of a shared map as a public ledger.
 
-- 读 99%，写 1%
-- 读 90%，写 10%
-- 读 50%，写 50%
-- 写 90%，读 10%
-- key 数量很少，例如 10 个
-- key 数量中等，例如 1,000 个
-- key 数量很多，例如 1,000,000 个
-- 热点 key 集中访问
-- 每次写入新 key
+- `Mutex` is like having one pen next to the ledger: anyone who reads or writes must take the pen first.
+- `RWMutex` allows many people to read the ledger at the same time, but everyone waits when someone edits it.
+- `sync.Map` adds special handling for read-heavy cases so commonly read entries can be seen faster, while writes and internal promotion still have their own costs.
+- A sharded map splits the ledger across multiple counters, so different keys can queue at different places.
 
-观察指标：
+## Experiment Design
 
-- 每次操作耗时
-- 吞吐量
-- 内存分配
-- 并发度变化后的表现
-- 热点 key 下的锁竞争
+The benchmark lives here:
 
-## 预期观察
+```text
+topics/go/sync-map/benchmark/
+```
 
-`sync.Map` 通常更适合读多写少、key 相对稳定、一次写入多次读取的场景。
+Run it with:
 
-`map + RWMutex` 在读多写少时也很直观，但写入频率上升后，读写锁竞争会影响表现。
+```bash
+cd topics/go/sync-map/benchmark
+go test -bench=. -benchmem -benchtime=1s -cpu=1,8
+```
 
-`map + Mutex` 实现简单，适合并发压力不高或临界区很小的场景。
+The experiment compares four implementations:
 
-分片 map 可以降低单把锁上的竞争，但实现复杂度更高，也需要合适的 hash 和分片数量。
+- `mutex`
+- `rwmutex`
+- `syncmap`
+- `shard32`
 
-## 常见误区
+It varies these factors:
 
-- 误以为 `sync.Map` 是所有并发 map 场景的默认选择。
-- 只看读多写少，不看 key 是否稳定。
-- 只看单机 benchmark，不考虑代码复杂度和维护成本。
-- 忽略热点 key 导致的局部竞争。
-- 忽略不同 Go 版本下实现和性能可能变化。
+- 99% reads, 1% writes.
+- 90% reads, 10% writes.
+- 50% reads, 50% writes.
+- 10% reads, 90% writes.
+- 1,000 stable keys.
+- Hot-key access.
+- Inserting a new key on every write.
 
-## 后续补充
+Observed metrics:
 
-- 添加 Go benchmark。
-- 输出不同读写比例下的结果表。
-- 记录不同并发度下的性能变化。
-- 补充结果图表和结论边界。
+- Time per operation.
+- Throughput.
+- Memory allocation.
+- Behavior under different concurrency levels.
+- Lock contention under hot keys.
+
+## How To Read The Results
+
+This repository records one local run:
+
+```text
+topics/go/sync-map/result/2026-05-28-darwin-arm64.md
+```
+
+Do not read this kind of benchmark as a single "which row is fastest" ranking. Read the shape:
+
+- With `-cpu=1`, there is little lock contention, so the overhead of extra mechanisms is easier to see.
+- With `-cpu=8`, contention increases, and the differences among sharding, read/write locks, and `sync.Map` become more visible.
+- As the write ratio rises, the read-sharing advantage of `RWMutex` weakens.
+- When access concentrates on a few keys, a sharded map can still degrade into queues on a small number of shards.
+- When the workload keeps inserting new keys, `sync.Map` is no longer only hitting its stable read path.
+
+## Explanation
+
+`sync.Map` is usually better suited to read-heavy workloads where keys are relatively stable and each key is written once but read many times. Its goal is not to replace every `map + lock` implementation; it targets the two common patterns described by the standard library documentation: write-once-read-many, and multiple goroutines reading or writing mostly disjoint key sets.
+
+`map + RWMutex` is intuitive in read-heavy cases because readers can proceed concurrently. Once writes become more frequent, though, the write lock blocks new readers, and the read/write lock itself has management overhead.
+
+`map + Mutex` is simple and often good enough when concurrency pressure is low or the critical section is tiny.
+
+A sharded map can reduce contention on a single lock, but it adds implementation complexity and depends on a suitable hash function and shard count.
+
+## Practical Boundaries
+
+Consider `sync.Map` when:
+
+- A key is read many times after it is written.
+- The key set is relatively stable, with frequent value updates but not constant creation of new keys.
+- Multiple goroutines mostly operate on different keys.
+- You accept the readability and type-assertion cost of `Load` returning `any`.
+
+Consider `map + RWMutex` or a sharded map when:
+
+- You need a strongly typed API.
+- You need to combine multiple map operations into one atomic critical section.
+- You need to maintain extra state, such as capacity, expiration time, or a reverse index.
+- The write ratio is high, or you need more control over memory and lifecycle.
+
+Consider `map + Mutex` when:
+
+- The critical section is very small.
+- Concurrency is low.
+- The code path is not hot.
+- Simplicity matters more than maximum throughput.
+
+## Common Misconceptions
+
+- Assuming `sync.Map` is the default choice for every concurrent map.
+- Looking only at read-heavy ratios without checking whether keys are stable.
+- Looking only at a local benchmark while ignoring code complexity and maintenance cost.
+- Ignoring local contention caused by hot keys.
+- Ignoring that Go version changes may affect implementation details and performance.
+
+## Summary
+
+Do not reduce the question to "is `sync.Map` fast?" Better questions are:
+
+- Are keys stable, or are new keys constantly created?
+- What is the read/write ratio?
+- Is access uniformly distributed, or concentrated on a few hot keys?
+- Do you need composed operations, a strongly typed wrapper, or extra state?
+- Is map contention actually the current bottleneck?
+
+Benchmark numbers become useful only after these conditions are clear.

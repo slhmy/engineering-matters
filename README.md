@@ -2,20 +2,20 @@
 
 Small experiments for understanding why engineering choices matter.
 
-`engineering-matters` 是一个面向后端工程实践的学习型仓库。它不追求直接给出“标准答案”，而是用通俗案例、可复现实验和清晰边界，解释一些工程选型为什么重要。
+`engineering-matters` is a learning repository for backend engineering practice. It does not try to hand out universal "standard answers"; it uses approachable scenarios, reproducible experiments, and explicit boundaries to explain why engineering choices matter.
 
-## 为什么做这个仓库
+## Why This Repository Exists
 
-很多工程问题在小规模时并不明显：
+Many engineering problems are hard to see at small scale:
 
-- Go 里并发读写一个 map，选择 `sync.Map`、`map + mutex` 还是分片 map？
-- 关系型数据库表变大之后，为什么索引、分页、DDL、归档都会变成问题？
-- 缓存为什么会出现穿透、击穿、雪崩和热点 key？
-- 重试、限流、幂等、连接池这些“最佳实践”到底解决了什么问题？
+- In Go, when multiple goroutines read and write a map concurrently, should you choose `sync.Map`, `map + mutex`, or a sharded map?
+- After a relational database table grows, why do indexes, pagination, DDL, and archival work become harder?
+- Why do caches suffer from cache penetration, cache breakdown, cache avalanche, and hot keys?
+- What problems do "best practices" such as retries, rate limiting, idempotency, and connection pools actually solve?
 
-这个仓库希望把这些问题拆成一个个小实验，让读者能先理解场景，再观察现象，最后形成判断。
+This repository breaks those questions into small experiments so readers can understand the scenario first, observe the behavior, and then form judgment.
 
-## 内容组织
+## Organization
 
 ```text
 topics/
@@ -26,33 +26,33 @@ topics/
   cache/
 ```
 
-每个主题尽量保持统一结构：
+Each topic should generally cover:
 
-- 问题是什么
-- 什么时候会遇到
-- 常见直觉是什么
-- 实验如何设计
-- 如何运行实验
-- 观察到什么结果
-- 为什么会这样
-- 适合什么场景
-- 不适合什么场景
-- 常见误区
+- What the problem is.
+- When it appears.
+- What the intuitive first solution is.
+- How the experiment is designed.
+- How to run the experiment.
+- What results were observed.
+- Why the behavior happens.
+- Where the approach fits.
+- Where it does not fit.
+- Common misconceptions.
 
-## 初始主题
+## Initial Topics
 
-- [Go sync map](topics/go/sync-map/): 比较几种并发 map 方案在不同读写比例、key 分布和热点访问模式下的表现。
-- [Database table growth](topics/database/table-growth/): 理解关系型数据库表增长后，查询、索引、分页和维护操作为什么会变复杂。
-- [Cache](topics/cache/): 记录缓存相关的常见现象和实践，例如穿透、击穿、雪崩、热点 key。
+- [Go sync map](topics/go/sync-map/): Compare several concurrent map strategies under different read/write ratios, key distributions, and hot-key access patterns.
+- [Database table growth](topics/database/table-growth/): Understand why queries, indexes, pagination, and maintenance work become more complex as relational database tables grow.
+- [Cache](topics/cache/): Track common cache behaviors and practices, such as cache penetration, cache breakdown, cache avalanche, and hot keys.
 
-## 写作原则
+## Writing Principles
 
-- 先讲场景，再讲方案。
-- 先做实验，再下结论。
-- 不说“永远应该”，只说“在什么条件下更合适”。
-- 用小规模代码解释大规模系统里的真实代价。
-- 结论要带边界，避免把最佳实践写成教条。
+- Explain the scenario before the solution.
+- Run the experiment before drawing conclusions.
+- Avoid "always do this"; explain when a choice is more suitable.
+- Use small pieces of code to reveal real costs in larger systems.
+- Keep conclusions bounded so they do not become dogma.
 
-## 运行状态
+## Status
 
-当前仓库处于初始化阶段，第一版先建立主题骨架。后续会逐步补充可运行代码、benchmark、数据生成脚本和实验结果。
+This repository is still in its early stage. The first version establishes the topic skeletons. Runnable code, benchmarks, data-generation scripts, and experiment results will be added gradually.

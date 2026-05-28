@@ -1,8 +1,8 @@
 # Topics
 
-`topics` 目录按工程问题分类，每个主题都是一个独立学习单元。
+The `topics` directory groups content by engineering problem. Each topic is an independent learning unit.
 
-## 推荐结构
+## Recommended Structure
 
 ```text
 topic-name/
@@ -12,25 +12,25 @@ topic-name/
   result/
 ```
 
-不是每个主题一开始都需要完整代码。早期可以先放 README，等问题边界稳定后再加入实验代码和结果。
+Not every topic needs complete code at the beginning. Early topics can start with only a `README.md`; add experiment code and results once the problem boundary becomes clear.
 
-## 主题模板
+## Topic Template
 
-每个主题建议覆盖：
+Each topic should generally cover:
 
-- 背景：这个问题在什么业务或系统场景中出现。
-- 直觉：很多人第一次会怎么做。
-- 方案：可以比较哪些实现或实践。
-- 实验：如何设计变量和观察指标。
-- 结果：实验输出和现象。
-- 解释：为什么会出现这些结果。
-- 边界：适用和不适用的条件。
-- 误区：容易被误解或过度使用的地方。
+- Background: what business or system scenario exposes this problem.
+- Intuition: what many engineers might try first.
+- Options: which implementations or practices can be compared.
+- Experiment: how to design the variables and observations.
+- Results: experiment output and observed behavior.
+- Explanation: why the behavior happens.
+- Boundaries: when each choice is suitable or unsuitable.
+- Misconceptions: where the topic is often misunderstood or overused.
 
-## 分类方向
+## Categories
 
-- `go`: Go 语言、并发、运行时、性能实验。
-- `database`: 关系型数据库、索引、事务、表增长、查询计划。
-- `cache`: 缓存模式、热点数据、失效策略、稳定性问题。
-- `queue`: 消息队列、重试、积压、反压。
-- `reliability`: 幂等、限流、超时、熔断、降级。
+- `go`: Go language behavior, concurrency, runtime behavior, and performance experiments.
+- `database`: Relational databases, indexes, transactions, table growth, and query plans.
+- `cache`: Cache patterns, hot data, expiration strategies, and reliability issues.
+- `queue`: Message queues, retries, backlog, and backpressure.
+- `reliability`: Idempotency, rate limiting, timeouts, circuit breakers, and graceful degradation.

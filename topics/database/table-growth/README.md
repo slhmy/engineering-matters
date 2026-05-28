@@ -1,44 +1,44 @@
 # Database table growth
 
-这个主题用小实验理解关系型数据库中的表变大之后，会逐渐暴露哪些问题。
+This topic uses small experiments to understand which problems gradually appear as relational database tables grow.
 
-## 问题背景
+## Problem Background
 
-一张业务表在早期可能只有几千行，查询、修改、加字段都很轻松。随着数据量增长到百万、千万甚至更高，很多原本不明显的问题会开始出现。
+A business table may have only a few thousand rows early on, making queries, updates, and schema changes feel easy. As the table grows to millions or tens of millions of rows, problems that were previously invisible begin to appear.
 
-例如：
+For example:
 
-- 没有索引的查询变慢。
-- 深分页越来越慢。
-- 统计查询消耗更多资源。
-- 大表 DDL 变得危险。
-- 备份、恢复和归档时间变长。
-- 冷热数据混在一起，影响常用查询。
+- Queries without indexes become slow.
+- Deep pagination gets slower.
+- Aggregation queries consume more resources.
+- DDL on large tables becomes risky.
+- Backups, restores, and archival jobs take longer.
+- Hot and cold data share the same table and affect common queries.
 
-## 通俗类比
+## Mental Model
 
-小表像一个薄笔记本，翻一遍也不费劲。
+A small table is like a thin notebook: scanning through it is still cheap.
 
-大表像一整座档案馆。没有目录时，找一份文件就要从头翻到尾；目录太多时，新增文件又需要维护很多索引卡片。
+A large table is more like an archive building. Without an index, finding one file means searching from beginning to end; with too many indexes, each new file requires maintaining many index cards.
 
-## 实验方向
+## Experiment Directions
 
-后续可以逐步补充：
+Future work can add:
 
-- 无索引查询和有索引查询对比。
-- `EXPLAIN` 查询计划观察。
-- `LIMIT/OFFSET` 深分页和基于游标的分页对比。
-- 插入数据时索引数量对写入性能的影响。
-- 大字段、宽表和覆盖索引的影响。
-- 冷热数据拆分或归档策略。
+- Queries with and without indexes.
+- `EXPLAIN` query-plan observations.
+- `LIMIT/OFFSET` deep pagination compared with cursor-based pagination.
+- The effect of index count on insert performance.
+- Wide rows, large columns, and covering indexes.
+- Hot/cold data splitting or archival strategies.
 
-## 关注重点
+## Focus
 
-这个主题不只关注“怎么优化 SQL”，更关注数据量增长后工程维护成本的变化。
+This topic is not only about "optimizing SQL"; it is about understanding how engineering maintenance costs change as data grows.
 
-## 后续补充
+## Next Additions
 
-- Docker Compose 启动数据库。
-- 数据生成脚本。
-- 可重复执行的 SQL 实验。
-- 查询计划和耗时结果记录。
+- Docker Compose database setup.
+- Data-generation scripts.
+- Repeatable SQL experiments.
+- Query-plan and latency result records.

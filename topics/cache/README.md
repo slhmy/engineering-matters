@@ -1,22 +1,22 @@
 # Cache
 
-缓存主题用于记录后端系统里常见的缓存现象、风险和实践。
+The cache category records common cache behaviors, risks, and practices in backend systems.
 
-## 计划主题
+## Planned Topics
 
-- 缓存穿透：请求的数据不存在，持续打到数据库。
-- 缓存击穿：热点 key 过期，大量请求同时回源。
-- 缓存雪崩：大量 key 同时失效，引发后端压力。
-- 热点 key：少数 key 承担极高访问量。
-- 缓存一致性：写数据库和删缓存之间的时序问题。
-- 本地缓存和分布式缓存：延迟、容量、一致性之间的取舍。
+- Cache penetration: requested data does not exist, so requests keep reaching the database.
+- Cache breakdown: a hot key expires and many requests fall back to the origin at the same time.
+- Cache avalanche: many keys expire together and put sudden pressure on downstream systems.
+- Hot keys: a small number of keys receive extremely high traffic.
+- Cache consistency: timing problems between writing the database and deleting or updating the cache.
+- Local cache vs distributed cache: tradeoffs among latency, capacity, and consistency.
 
-## 写作方式
+## Writing Style
 
-每个缓存问题都尽量包含：
+Each cache topic should include:
 
-- 一个容易理解的业务故事。
-- 一个最小可复现模型。
-- 现象观察。
-- 常见解决方案。
-- 方案的代价和适用边界。
+- An easy-to-understand business story.
+- A minimal reproducible model.
+- Observed behavior.
+- Common solutions.
+- The costs and boundaries of those solutions.

@@ -73,8 +73,12 @@ It varies these factors:
 - 90% reads, 10% writes.
 - 50% reads, 50% writes.
 - 10% reads, 90% writes.
+- 100% writes on uniformly distributed stable keys.
 - 1,000 stable keys.
 - Hot-key access.
+- 90% writes on 10 hot keys.
+- 100% writes on a single hot key.
+- 50% reads and 50% writes on a single hot key.
 - Inserting a new key on every write.
 
 Observed metrics:
@@ -99,6 +103,8 @@ Do not read this kind of benchmark as a single "which row is fastest" ranking. R
 - With `-cpu=8`, contention increases, and the differences among sharding, read/write locks, and `sync.Map` become more visible.
 - As the write ratio rises, the read-sharing advantage of `RWMutex` weakens.
 - When access concentrates on a few keys, a sharded map can still degrade into queues on a small number of shards.
+- A high write ratio alone does not imply high contention; uniformly distributed writes can still run in parallel.
+- When every goroutine writes the same hot key, the local lock and allocation costs of `sync.Map` become visible.
 - When the workload keeps inserting new keys, `sync.Map` is no longer only hitting its stable read path.
 
 ## Explanation

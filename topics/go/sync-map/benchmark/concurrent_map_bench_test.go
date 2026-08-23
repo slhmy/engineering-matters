@@ -182,6 +182,10 @@ var workloads = []workload{
 	{name: "read50_keys1k", readPct: 50, keySpace: 1_000},
 	{name: "write90_keys1k", readPct: 10, keySpace: 1_000},
 	{name: "read99_hot10", readPct: 99, keySpace: 1_000, hotKeys: 10},
+	{name: "write100_keys1k", readPct: 0, keySpace: 1_000},
+	{name: "write90_hot10", readPct: 10, keySpace: 1_000, hotKeys: 10},
+	{name: "write100_hot1", readPct: 0, keySpace: 1_000, hotKeys: 1},
+	{name: "read50_hot1", readPct: 50, keySpace: 1_000, hotKeys: 1},
 	{name: "insert_new_keys", readPct: 0, keySpace: 1_000, insertOnly: true},
 }
 

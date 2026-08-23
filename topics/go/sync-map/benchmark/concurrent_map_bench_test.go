@@ -172,7 +172,10 @@ var factories = []mapFactory{
 	{name: "mutex", new: func(size int) concurrentMap { return newMutexMap(size) }},
 	{name: "rwmutex", new: func(size int) concurrentMap { return newRWMutexMap(size) }},
 	{name: "syncmap", new: func(size int) concurrentMap { return newSyncMap(size) }},
+	{name: "shard4", new: func(size int) concurrentMap { return newShardMap(size, 4) }},
+	{name: "shard8", new: func(size int) concurrentMap { return newShardMap(size, 8) }},
 	{name: "shard32", new: func(size int) concurrentMap { return newShardMap(size, 32) }},
+	{name: "shard128", new: func(size int) concurrentMap { return newShardMap(size, 128) }},
 	{name: "orcaman32", new: func(size int) concurrentMap { return newOrcamanMap(size) }},
 }
 

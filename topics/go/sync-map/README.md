@@ -57,15 +57,18 @@ cd topics/go/sync-map/benchmark
 go test -bench=. -benchmem -benchtime=1s -cpu=1,4,8
 ```
 
-The experiment compares five implementations:
+The experiment compares eight implementations:
 
 - `mutex`
 - `rwmutex`
 - `syncmap`
+- `shard4`
+- `shard8`
 - `shard32`
+- `shard128`
 - `orcaman32`
 
-`orcaman32` uses `github.com/orcaman/concurrent-map/v2` with an integer key and a custom sharding function, so it can be compared with the local `shard32` implementation without adding string-conversion cost.
+The local sharded maps use the same hash function and differ only in shard count. `orcaman32` uses `github.com/orcaman/concurrent-map/v2` with an integer key and a custom sharding function, so it can be compared with the local `shard32` implementation without adding string-conversion cost.
 
 It varies these factors:
 
@@ -75,6 +78,7 @@ It varies these factors:
 - 10% reads, 90% writes.
 - 100% writes on uniformly distributed stable keys.
 - 1,000 stable keys.
+- 4, 8, 32, and 128 shards for the local sharded-map implementation.
 - Hot-key access.
 - 90% writes on 10 hot keys.
 - 100% writes on a single hot key.
@@ -103,6 +107,7 @@ Do not read this kind of benchmark as a single "which row is fastest" ranking. R
 - With `-cpu=8`, contention increases, and the differences among sharding, read/write locks, and `sync.Map` become more visible.
 - As the write ratio rises, the read-sharing advantage of `RWMutex` weakens.
 - When access concentrates on a few keys, a sharded map can still degrade into queues on a small number of shards.
+- Increasing the shard count can reduce unrelated-key contention, but adds more locks and may not help when the key set or access pattern is small.
 - A high write ratio alone does not imply high contention; uniformly distributed writes can still run in parallel.
 - When every goroutine writes the same hot key, the local lock and allocation costs of `sync.Map` become visible.
 - When the workload keeps inserting new keys, `sync.Map` is no longer only hitting its stable read path.

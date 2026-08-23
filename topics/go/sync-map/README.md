@@ -1,6 +1,6 @@
 # Go sync map
 
-This topic uses a small experiment to compare several concurrent map strategies in Go: `map + sync.Mutex`, `map + sync.RWMutex`, `sync.Map`, and a sharded map.
+This topic uses a small experiment to compare several concurrent map strategies in Go: `map + sync.Mutex`, `map + sync.RWMutex`, `sync.Map`, a hand-written sharded map, and `orcaman/concurrent-map`.
 
 ## Problem Background
 
@@ -28,7 +28,8 @@ The catch is that "concurrency-safe" only means the program will not crash becau
 | `map + sync.Mutex` | All reads and writes share one exclusive lock. | Is the simplest solution good enough when the critical section is short and concurrency is low? |
 | `map + sync.RWMutex` | Reads share a read lock; writes take an exclusive lock. | Does the read lock reduce waiting in read-heavy workloads? |
 | `sync.Map` | The standard library concurrent map optimized for specific access patterns. | Does it help when keys are relatively stable and reads dominate writes? |
-| Sharded map | Spread keys across multiple locks. | Does sharding reduce contention when keys are well distributed? |
+| Hand-written sharded map | Spread keys across multiple locks. | Does sharding reduce contention when keys are well distributed? |
+| `orcaman/concurrent-map` | A third-party sharded map with 32 shards by default. | How does a maintained sharded-map library compare with a small local implementation? |
 
 None of these options is universally better. They fit different access patterns.
 
@@ -56,12 +57,15 @@ cd topics/go/sync-map/benchmark
 go test -bench=. -benchmem -benchtime=1s -cpu=1,8
 ```
 
-The experiment compares four implementations:
+The experiment compares five implementations:
 
 - `mutex`
 - `rwmutex`
 - `syncmap`
 - `shard32`
+- `orcaman32`
+
+`orcaman32` uses `github.com/orcaman/concurrent-map/v2` with an integer key and a custom sharding function, so it can be compared with the local `shard32` implementation without adding string-conversion cost.
 
 It varies these factors:
 
@@ -83,10 +87,10 @@ Observed metrics:
 
 ## How To Read The Results
 
-This repository records one local run:
+This repository records local runs:
 
 ```text
-topics/go/sync-map/result/2026-05-28-darwin-arm64.md
+topics/go/sync-map/result/2026-08-23-darwin-arm64.md
 ```
 
 Do not read this kind of benchmark as a single "which row is fastest" ranking. Read the shape:
@@ -105,7 +109,7 @@ Do not read this kind of benchmark as a single "which row is fastest" ranking. R
 
 `map + Mutex` is simple and often good enough when concurrency pressure is low or the critical section is tiny.
 
-A sharded map can reduce contention on a single lock, but it adds implementation complexity and depends on a suitable hash function and shard count.
+A sharded map can reduce contention on a single lock, but it adds implementation complexity and depends on a suitable hash function and shard count. A third-party library such as `orcaman/concurrent-map` can remove some maintenance burden, but it is still a sharded-map design rather than a universally better replacement for `sync.Map`.
 
 ## Practical Boundaries
 

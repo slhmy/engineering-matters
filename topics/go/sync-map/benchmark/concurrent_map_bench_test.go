@@ -4,6 +4,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	cmap "github.com/orcaman/concurrent-map/v2"
 )
 
 type concurrentMap interface {
@@ -129,6 +131,30 @@ func (m *shardMap) Store(key int, value int) {
 	s.mu.Unlock()
 }
 
+type orcamanMap struct {
+	m cmap.ConcurrentMap[int, int]
+}
+
+func newOrcamanMap(size int) *orcamanMap {
+	m := &orcamanMap{
+		m: cmap.NewWithCustomShardingFunction[int, int](func(key int) uint32 {
+			return uint32(uint64(key) * 11400714819323198485)
+		}),
+	}
+	for i := 0; i < size; i++ {
+		m.m.Set(i, i)
+	}
+	return m
+}
+
+func (m *orcamanMap) Load(key int) (int, bool) {
+	return m.m.Get(key)
+}
+
+func (m *orcamanMap) Store(key int, value int) {
+	m.m.Set(key, value)
+}
+
 type mapFactory struct {
 	name string
 	new  func(size int) concurrentMap
@@ -147,6 +173,7 @@ var factories = []mapFactory{
 	{name: "rwmutex", new: func(size int) concurrentMap { return newRWMutexMap(size) }},
 	{name: "syncmap", new: func(size int) concurrentMap { return newSyncMap(size) }},
 	{name: "shard32", new: func(size int) concurrentMap { return newShardMap(size, 32) }},
+	{name: "orcaman32", new: func(size int) concurrentMap { return newOrcamanMap(size) }},
 }
 
 var workloads = []workload{

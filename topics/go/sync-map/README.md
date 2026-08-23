@@ -54,7 +54,7 @@ Run it with:
 
 ```bash
 cd topics/go/sync-map/benchmark
-go test -bench=. -benchmem -benchtime=1s -cpu=1,8
+go test -bench=. -benchmem -benchtime=1s -cpu=1,4,8
 ```
 
 The experiment compares five implementations:

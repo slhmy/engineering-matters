@@ -122,6 +122,47 @@ Do not read this kind of benchmark as a single "which row is fastest" ranking. R
 
 A sharded map can reduce contention on a single lock, but it adds implementation complexity and depends on a suitable hash function and shard count. A third-party library such as `orcaman/concurrent-map` can remove some maintenance burden, but it is still a sharded-map design rather than a universally better replacement for `sync.Map`.
 
+## Source Walkthrough
+
+The benchmark uses Go 1.26.6. In this version, `sync.Map` is a thin wrapper around an internal generic `HashTrieMap` rather than a regular Go map protected by one global lock:
+
+- [`sync.Map`](https://github.com/golang/go/blob/go1.26.6/src/sync/map.go) stores an `internal/sync.HashTrieMap[any, any]`.
+- [`HashTrieMap`](https://github.com/golang/go/blob/go1.26.6/src/internal/sync/hashtriemap.go) is a concurrent hash trie.
+- Each indirect trie node has 16 atomic child pointers and a mutex used when that part of the tree is changed.
+- Leaf entries contain the key and value. An update publishes a new entry instead of mutating the entry currently visible to readers.
+
+The read path is approximately:
+
+```text
+hash key
+  -> atomically load root
+  -> atomically follow trie children
+  -> compare key in the leaf entry
+  -> return value
+```
+
+After initialization, this path does not acquire a map mutex. Multiple readers can therefore traverse the structure at the same time, which explains the `syncmap` result of about `3.4 ns/op` at `-cpu=8` in the stable, read-heavy workload.
+
+The write path is different:
+
+```text
+find target node without locking
+  -> lock the affected trie node
+  -> check that the node is still current
+  -> create or replace an entry
+  -> atomically publish the new pointer
+```
+
+The lock protects one part of the trie, not the whole map. Writes to unrelated keys can use different node locks, while writes to the same key still serialize. Replacing an entry also creates allocation and garbage-collection work; the benchmark reports this as `B/op` and `allocs/op` for `syncmap` writes.
+
+This explains the shape of the experiment:
+
+- Uniform writes across 1,000 keys can use different trie regions, so `sync.Map` and larger sharded maps scale better than a single global lock.
+- Increasing a local sharded map from 4 to 128 shards reduces unrelated-key contention, but adds lock and memory overhead.
+- A single hot key always reaches one trie region and one shard, so more shards do not remove that bottleneck. In this run, `syncmap` reached `107.7 ns/op` for that workload at `-cpu=8`.
+
+Many older articles describe `sync.Map` using a `readOnly` map, a `dirty` map, and miss promotion. That describes an older implementation strategy. The exact internals are version-dependent, so source explanations should be checked against the Go version used by the benchmark.
+
 ## Practical Boundaries
 
 Consider `sync.Map` when:

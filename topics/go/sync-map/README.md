@@ -124,44 +124,200 @@ A sharded map can reduce contention on a single lock, but it adds implementation
 
 ## Source Walkthrough
 
-The benchmark uses Go 1.26.6. In this version, `sync.Map` is a thin wrapper around an internal generic `HashTrieMap` rather than a regular Go map protected by one global lock:
+The benchmark uses Go 1.26.6. In this version, `sync.Map` is implemented with a concurrent hash trie. This is different from the `readOnly` and `dirty` dual-map implementation described by many older articles.
 
-- [`sync.Map`](https://github.com/golang/go/blob/go1.26.6/src/sync/map.go) stores an `internal/sync.HashTrieMap[any, any]`.
-- [`HashTrieMap`](https://github.com/golang/go/blob/go1.26.6/src/internal/sync/hashtriemap.go) is a concurrent hash trie.
-- Each indirect trie node has 16 atomic child pointers and a mutex used when that part of the tree is changed.
-- Leaf entries contain the key and value. An update publishes a new entry instead of mutating the entry currently visible to readers.
+### Public Wrapper
 
-The read path is approximately:
+The public type is intentionally small. [`sync.Map`](https://github.com/golang/go/blob/go1.26.6/src/sync/map.go#L38-L54) delegates its operations to an internal generic map:
 
-```text
-hash key
-  -> atomically load root
-  -> atomically follow trie children
-  -> compare key in the leaf entry
-  -> return value
+```go
+type Map struct {
+	_ noCopy
+	m isync.HashTrieMap[any, any]
+}
+
+func (m *Map) Load(key any) (value any, ok bool) {
+	return m.m.Load(key)
+}
+
+func (m *Map) Store(key, value any) {
+	m.m.Store(key, value)
+}
 ```
 
-After initialization, this path does not acquire a map mutex. Multiple readers can therefore traverse the structure at the same time, which explains the `syncmap` result of about `3.4 ns/op` at `-cpu=8` in the stable, read-heavy workload.
+The public API still uses `any`, even though the internal implementation is generic. This preserves the existing API but means callers pay for interface keys and values, and usually need a type assertion after `Load`. The benchmark wrapper includes that assertion for `syncmap`.
 
-The write path is different:
+### Core Data Structure
 
-```text
-find target node without locking
-  -> lock the affected trie node
-  -> check that the node is still current
-  -> create or replace an entry
-  -> atomically publish the new pointer
+The important fields in [`HashTrieMap`](https://github.com/golang/go/blob/go1.26.6/src/internal/sync/hashtriemap.go#L21-L28) are:
+
+```go
+type HashTrieMap[K comparable, V any] struct {
+	inited  atomic.Uint32
+	initMu  Mutex
+	root    atomic.Pointer[indirect[K, V]]
+	keyHash hashFunc
+	seed    uintptr
+}
 ```
 
-The lock protects one part of the trie, not the whole map. Writes to unrelated keys can use different node locks, while writes to the same key still serialize. Replacing an entry also creates allocation and garbage-collection work; the benchmark reports this as `B/op` and `allocs/op` for `syncmap` writes.
+The trie contains two node forms. The following is simplified from the [node definitions](https://github.com/golang/go/blob/go1.26.6/src/internal/sync/hashtriemap.go#L530-L576):
 
-This explains the shape of the experiment:
+```go
+type indirect[K comparable, V any] struct {
+	dead     atomic.Bool
+	mu       Mutex
+	parent   *indirect[K, V]
+	children [16]atomic.Pointer[node[K, V]]
+}
 
-- Uniform writes across 1,000 keys can use different trie regions, so `sync.Map` and larger sharded maps scale better than a single global lock.
-- Increasing a local sharded map from 4 to 128 shards reduces unrelated-key contention, but adds lock and memory overhead.
-- A single hot key always reaches one trie region and one shard, so more shards do not remove that bottleneck. In this run, `syncmap` reached `107.7 ns/op` for that workload at `-cpu=8`.
+type entry[K comparable, V any] struct {
+	overflow atomic.Pointer[entry[K, V]]
+	key      K
+	value    V
+}
+```
 
-Many older articles describe `sync.Map` using a `readOnly` map, a `dirty` map, and miss promotion. That describes an older implementation strategy. The exact internals are version-dependent, so source explanations should be checked against the Go version used by the benchmark.
+An `indirect` node is a branch in the trie. Its mutex protects mutations to that branch and to direct entry children; it is not a map-wide mutex. Each child pointer is atomic so readers can traverse a branch without acquiring `mu`.
+
+An `entry` is a leaf containing one key and value. `overflow` links entries whose full hashes collide. A normal lookup follows the trie first and only scans this chain when keys have the same hash path.
+
+The trie consumes four hash bits per level because each branch has 16 children:
+
+```text
+hash bits:  [63..60] [59..56] [55..52] ...
+child index:    0         1         2
+```
+
+The source comments call 16 children the load-performance sweet spot: fewer children make the trie deeper, while 32 children add space for little additional read improvement. This is a separate choice from the 4, 8, 32, and 128 top-level shards in the hand-written benchmark map.
+
+### Lazy Initialization
+
+The zero value is usable because initialization happens on the first operation. [`initSlow`](https://github.com/golang/go/blob/go1.26.6/src/internal/sync/hashtriemap.go#L30-L55) takes `initMu`, checks the flag again, and then initializes:
+
+- An empty root node.
+- The runtime map hasher for the key type.
+- The equality function needed by compare operations.
+- A random hash seed.
+
+The root and metadata are prepared before `inited.Store(1)` publishes the initialized state. Only the first operation may take this initialization lock; steady-state reads see `inited != 0` and continue directly.
+
+### Load Path
+
+The key part of [`Load`](https://github.com/golang/go/blob/go1.26.6/src/internal/sync/hashtriemap.go#L64-L82) is:
+
+```go
+hash := ht.keyHash(abi.NoEscape(unsafe.Pointer(&key)), ht.seed)
+i := ht.root.Load()
+hashShift := 8 * goarch.PtrSize
+var zero V
+
+for hashShift != 0 {
+	hashShift -= 4
+	n := i.children[(hash>>hashShift)&15].Load()
+	if n == nil {
+		return zero, false
+	}
+	if n.isEntry {
+		return n.entry().lookup(key)
+	}
+	i = n.indirect()
+}
+```
+
+The steps are:
+
+1. Hash the key using Go's runtime map hasher and the map-specific seed.
+2. Atomically load the root pointer.
+3. Select one of 16 children from the next four hash bits.
+4. Atomically load that child pointer.
+5. Return immediately for a missing child, compare the key for an entry, or continue through another indirect node.
+
+`abi.NoEscape` prevents passing the key pointer to the hasher from unnecessarily making the key escape to the heap. The returned zero value is also normally optimized without a heap allocation.
+
+After initialization, `Load` does not acquire a mutex. Readers may observe either the old or new immutable entry around a concurrent replacement, but never a partially initialized entry. This explains why stable reads scale from one CPU to multiple CPUs without a shared lock becoming a queue.
+
+This read path is better described as mutex-free than as universally cost-free. It still performs hashing, atomic pointer loads, pointer chasing, interface handling, and key comparison. Those costs are visible in the `-cpu=1` baseline, where a regular map protected by an uncontended lock can be cheaper.
+
+### Store And Swap Path
+
+[`Store`](https://github.com/golang/go/blob/go1.26.6/src/internal/sync/hashtriemap.go#L198-L201) delegates to [`Swap`](https://github.com/golang/go/blob/go1.26.6/src/internal/sync/hashtriemap.go#L203-L274). The write algorithm uses optimistic traversal followed by validation under a local lock:
+
+```text
+traverse atomically to a candidate slot
+  -> lock the parent indirect node
+  -> reload the slot
+  -> verify that the parent is not dead
+  -> update, insert, or restart
+```
+
+The slot must be reloaded after locking because another writer may have changed the branch between the optimistic traversal and `mu.Lock`. The `dead` flag handles a parent node that was detached while this goroutine was traversing it. If either check fails, the writer unlocks and starts again from the current root.
+
+For an existing key, `entry.swap` creates a replacement entry and the writer publishes it with `slot.Store`. Readers that already loaded the old pointer can finish reading the old entry, while later readers see the replacement. Go's garbage collector eventually reclaims the old entry after no reader can reach it.
+
+This copy-and-publish update has two consequences:
+
+- Readers do not need to coordinate with an in-place value mutation.
+- Repeated writes create allocation and garbage-collection work, which appears in the benchmark as non-zero `B/op` and `allocs/op` for `syncmap`.
+
+### New-Key Insertion And Trie Expansion
+
+If the candidate slot is empty, the writer creates an entry and atomically stores it. If the slot contains a different key, [`expand`](https://github.com/golang/go/blob/go1.26.6/src/internal/sync/hashtriemap.go#L165-L195) compares their hashes:
+
+- Equal full hashes use the `overflow` chain.
+- Different hashes create indirect nodes until one four-bit group selects different children.
+
+The complete new subtree is built before its top pointer is stored into the existing trie. Publishing the subtree last prevents readers from seeing an intermediate state where the old key has disappeared but the new subtree is incomplete.
+
+This path explains why continuously inserting new keys costs more than replacing stable keys. It may allocate an entry, one or more indirect nodes, and collision-chain state, in addition to increasing the live map size.
+
+### Delete And Structural Cleanup
+
+Delete operations first find the entry, lock its parent node, and validate the slot using the same retry pattern as writes. [`LoadAndDelete`](https://github.com/golang/go/blob/go1.26.6/src/internal/sync/hashtriemap.go#L307-L355) then either replaces an overflow chain or stores `nil` into the child slot.
+
+If an indirect node becomes empty, deletion walks toward the root:
+
+```text
+lock parent
+  -> mark empty child node as dead
+  -> unlink it from the parent
+  -> continue while the parent is empty
+```
+
+Marking the detached node `dead` is what makes concurrent writers that reached the stale node retry instead of publishing into a branch no longer reachable from the root. Readers that already hold the old pointer can still finish safely.
+
+### Range And Clear
+
+[`Range`](https://github.com/golang/go/blob/go1.26.6/src/internal/sync/hashtriemap.go#L473-L518) recursively follows atomic child pointers without locking the whole map. It therefore does not return a consistent snapshot: concurrent updates may cause different keys to reflect different points in time.
+
+[`Clear`](https://github.com/golang/go/blob/go1.26.6/src/internal/sync/hashtriemap.go#L521-L528) creates a new empty root and publishes it with one atomic store. The logical clear is small, while reclamation of the old tree is deferred to garbage collection.
+
+### Memory Ordering And Linearization
+
+The public `sync.Map` contract states that a write synchronizes before a read that observes it. The atomic child and root stores are publication points: the entry or subtree is fully initialized before its pointer becomes visible. Atomic loads then give readers a complete published object.
+
+Local node mutexes serialize conflicting writers and protect structural decisions. They do not make one global snapshot of the whole trie, which is why independent branches can progress concurrently and why `Range` has weaker snapshot guarantees.
+
+The practical distinction is:
+
+```text
+Load:       hash + atomic traversal, no steady-state mutex
+same key:   serialized at the same local node
+other keys: may proceed through different local nodes
+new keys:   may allocate entries and expand the trie
+```
+
+### Connecting Source To Results
+
+The source explains the benchmark shape:
+
+- Stable, read-heavy keys benefit from the mutex-free `Load` path. In this run, `syncmap` reaches about `3.4 ns/op` at `-cpu=8`.
+- Uniform writes across 1,000 keys can reach different trie regions, so `sync.Map` scales much better than a single global lock despite allocating replacement entries.
+- A single hot key sends every writer to the same local node. The optimistic traversal cannot remove that serialization, and `syncmap` reaches `107.7 ns/op` in the 100% hot-write workload at `-cpu=8`.
+- Continuous new-key insertion exercises entry allocation and trie expansion, producing `3 allocs/op` for `syncmap` in this run.
+- Increasing the hand-written map from 4 to 128 shards reduces unrelated-key lock contention, but it does not change the trie internals of `sync.Map` and does not solve a single hot-key bottleneck.
+
+These details are implementation-specific. Older Go versions used the `readOnly` map, `dirty` map, and miss-promotion design. Recheck the source for the exact Go version before using implementation details to explain application behavior.
 
 ## Practical Boundaries
 

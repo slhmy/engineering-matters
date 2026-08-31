@@ -21,16 +21,26 @@ A small table is like a thin notebook: scanning through it is still cheap.
 
 A large table is more like an archive building. Without an index, finding one file means searching from beginning to end; with too many indexes, each new file requires maintaining many index cards.
 
-## Experiment Directions
+## First Experiment: Query Cost As Rows Grow
 
-Future work can add:
+The first runnable experiment is in [`benchmark/`](benchmark/). It uses SQLite's standard library interface, so it can be run locally without a database server or third-party package.
 
-- Queries with and without indexes.
-- `EXPLAIN` query-plan observations.
-- `LIMIT/OFFSET` deep pagination compared with cursor-based pagination.
-- The effect of index count on insert performance.
-- Wide rows, large columns, and covering indexes.
-- Hot/cold data splitting or archival strategies.
+It compares:
+
+- An equality lookup on `customer_id` without an index and with an index.
+- A deep page using `LIMIT/OFFSET` and the same page using a `(created_at, id)` cursor.
+
+The experiment varies row count (`100000` and `1000000`) while keeping the data shape and query shape fixed. It records median warm-query latency and the SQLite query plan. See [`benchmark/README.md`](benchmark/README.md) for the exact command and assumptions.
+
+One local run is recorded in [`result/2026-08-31-darwin-arm64.md`](result/2026-08-31-darwin-arm64.md). Run the benchmark again on your own machine before using the numbers to make a capacity decision.
+
+### Expected Shape
+
+Without an index, the lookup has to inspect the table until it finds qualifying rows. An index changes that work into an index traversal plus row lookups, which is usually a better trade when the predicate is selective enough. The index is not free: it consumes space and must be maintained by writes.
+
+For a deep page, `OFFSET` expresses "walk in order, discard N rows, then return the next page." A cursor expresses "start after this known key." The latter avoids repeating the discard work as the position moves deeper, but it requires a stable, ordered cursor and does not naturally support jumping to an arbitrary page number.
+
+These are tendencies, not guarantees. Selectivity, cache state, row width, indexes, query plan choices, and the database engine all affect the result.
 
 ## Focus
 
@@ -38,7 +48,7 @@ This topic is not only about "optimizing SQL"; it is about understanding how eng
 
 ## Next Additions
 
-- Docker Compose database setup.
-- Data-generation scripts.
-- Repeatable SQL experiments.
-- Query-plan and latency result records.
+- Measure insert throughput and database size with zero, one, and several indexes.
+- Compare narrow rows with wide payloads and covering indexes.
+- Add archival or hot/cold data experiments.
+- Repeat the same cases against a client/server database and record concurrency effects.

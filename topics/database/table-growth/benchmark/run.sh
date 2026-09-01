@@ -1,11 +1,31 @@
 #!/bin/sh
 set -eu
 
-ROWS="${1:-100000}"
+EXPERIMENT="${1:-table-growth}"
+ROWS="${2:-100000}"
+
+# Keep the original ./run.sh 100000 form for the base experiment.
+case "$EXPERIMENT" in
+  *[!0-9]*) ;;
+  *)
+    ROWS="$EXPERIMENT"
+    EXPERIMENT="table-growth"
+    ;;
+esac
+
+case "$EXPERIMENT" in
+  table-growth) SQL_FILE="table-growth.sql" ;;
+  uuid-ids) SQL_FILE="uuid-ids.sql" ;;
+  kth-largest) SQL_FILE="kth-largest.sql" ;;
+  *)
+    echo "usage: $0 {table-growth|uuid-ids|kth-largest} [row-count]" >&2
+    exit 2
+    ;;
+esac
 
 case "$ROWS" in
   *[!0-9]*|'')
-    echo "usage: $0 [positive-row-count]" >&2
+    echo "usage: $0 {table-growth|uuid-ids|kth-largest} [row-count]" >&2
     exit 2
     ;;
 esac
@@ -21,4 +41,4 @@ docker compose exec -T postgres psql \
   --dbname table_growth \
   --set ON_ERROR_STOP=1 \
   --set rows="$ROWS" \
-  --file /benchmark/run.sql
+  --file "/benchmark/$SQL_FILE"

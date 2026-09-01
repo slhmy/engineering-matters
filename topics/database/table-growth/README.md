@@ -23,16 +23,16 @@ A large table is more like an archive building. Without an index, finding one fi
 
 ## First Experiment: Query Cost As Rows Grow
 
-The first runnable experiment is in [`benchmark/`](benchmark/). It uses SQLite's standard library interface, so it can be run locally without a database server or third-party package.
+The first runnable experiment is in [`benchmark/`](benchmark/). It runs a fixed PostgreSQL version with Docker Compose so the database engine and server configuration are explicit.
 
 It compares:
 
 - An equality lookup on `customer_id` without an index and with an index.
 - A deep page using `LIMIT/OFFSET` and the same page using a `(created_at, id)` cursor.
 
-The experiment varies row count (`100000` and `1000000`) while keeping the data shape and query shape fixed. It records median warm-query latency and the SQLite query plan. See [`benchmark/README.md`](benchmark/README.md) for the exact command and assumptions.
+The experiment varies row count (`100000` and `1000000`) while keeping the data shape and query shape fixed. It uses `EXPLAIN (ANALYZE, BUFFERS)` to record the chosen PostgreSQL plan, execution time, and visited buffers. See [`benchmark/README.md`](benchmark/README.md) for the exact command and assumptions.
 
-One local run is recorded in [`result/2026-08-31-darwin-arm64.md`](result/2026-08-31-darwin-arm64.md). Run the benchmark again on your own machine before using the numbers to make a capacity decision.
+One local run is recorded in [`result/2026-09-01-postgresql-17-darwin-arm64.md`](result/2026-09-01-postgresql-17-darwin-arm64.md), including plans that changed as the table grew. Run the benchmark on your own environment before using the numbers to make a capacity decision.
 
 ### Expected Shape
 
@@ -51,4 +51,4 @@ This topic is not only about "optimizing SQL"; it is about understanding how eng
 - Measure insert throughput and database size with zero, one, and several indexes.
 - Compare narrow rows with wide payloads and covering indexes.
 - Add archival or hot/cold data experiments.
-- Repeat the same cases against a client/server database and record concurrency effects.
+- Add concurrent readers and writers to expose cache, I/O, and lock effects.

@@ -1,0 +1,20 @@
+name: table-growth
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: table_growth
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d table_growth"]
+      interval: 1s
+      timeout: 5s
+      retries: 30
+    ports:
+      - "127.0.0.1:15432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ./sql:/benchmark:ro

@@ -15,18 +15,25 @@ Choosing UUID instead of `bigint` changes more than the textual shape of an ID. 
 
 The ordered UUID is deliberately synthetic. It is a control variable, not an ID-generation recommendation or an implementation of UUIDv7. The random UUIDs are generated before measurement so hashing does not count as insertion work.
 
-Run:
+## Experiment
+
+The runnable PostgreSQL experiment is in [`benchmark/`](benchmark/). Run it from that directory:
 
 ```bash
-./run.sh uuid-ids 100000
-./run.sh uuid-ids 1000000
+cd topics/database/uuid-primary-keys/benchmark
+./run.sh 100000
+./run.sh 1000000
 ```
+
+Remove the temporary database after the run with `docker compose down`.
 
 Inspect:
 
 - `Buffers` and `WAL` for each `INSERT`; treat one run's execution time as secondary evidence.
 - Primary-key index and total relation size.
 - B-tree depth as indirectly reflected by buffers visited during point lookup.
+
+One local run is recorded in [`result/2026-09-01-postgresql-17-darwin-arm64.md`](result/2026-09-01-postgresql-17-darwin-arm64.md).
 
 ## Expected Shape
 

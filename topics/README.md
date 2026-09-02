@@ -30,7 +30,7 @@ Each topic should generally cover:
 ## Categories
 
 - `go`: Go language behavior, concurrency, runtime behavior, and performance experiments.
-- `database`: Relational databases, indexes, transactions, table growth, and query plans.
+- [`database`](database/): Relational databases, indexes, transactions, table growth, and query plans.
 - `cache`: Cache patterns, hot data, expiration strategies, and reliability issues.
 - `queue`: Message queues, retries, backlog, and backpressure.
 - `reliability`: Idempotency, rate limiting, timeouts, circuit breakers, and graceful degradation.

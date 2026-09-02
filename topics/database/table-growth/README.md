@@ -30,14 +30,9 @@ It compares:
 - An equality lookup on `customer_id` without an index and with an index.
 - A deep page using `LIMIT/OFFSET` and the same page using a `(created_at, id)` cursor.
 
-Two extensions isolate related pressures:
-
-- [`benchmark/uuid-ids.md`](benchmark/uuid-ids.md) compares sequential `bigint`, ordered UUID, and random UUID primary keys without counting UUID-generation work as insertion work.
-- [`benchmark/kth-largest.md`](benchmark/kth-largest.md) defines several meanings of "x-th largest" and compares indexed offsets with precomputed ranks.
-
 The experiment varies row count (`100000` and `1000000`) while keeping the data shape and query shape fixed. It uses `EXPLAIN (ANALYZE, BUFFERS)` to record the chosen PostgreSQL plan, execution time, and visited buffers. See [`benchmark/README.md`](benchmark/README.md) for the exact command and assumptions.
 
-Local runs are recorded for the [base experiment](result/2026-09-01-postgresql-17-darwin-arm64.md) and the [UUID/rank extensions](result/2026-09-01-postgresql-17-extensions.md). Run the benchmark on your own environment before using the numbers to make a capacity decision.
+One local run is recorded in [`result/2026-09-01-postgresql-17-darwin-arm64.md`](result/2026-09-01-postgresql-17-darwin-arm64.md). Run the benchmark on your own environment before using the numbers to make a capacity decision.
 
 ### Expected Shape
 

@@ -9,16 +9,19 @@
 
 This experiment measures the first two meanings and one read-optimized alternative.
 
-## Cases
+## Experiment
 
 The `scores` table has at most 10,000 score values, so larger runs contain many ties. Its `(score DESC, id ASC)` index makes row ordering deterministic and allows index-only scans.
 
-Run:
+The runnable PostgreSQL experiment is in [`benchmark/`](benchmark/). Run it from that directory:
 
 ```bash
-./run.sh kth-largest 100000
-./run.sh kth-largest 1000000
+cd topics/database/kth-largest/benchmark
+./run.sh 100000
+./run.sh 1000000
 ```
+
+Remove the temporary database after the run with `docker compose down`.
 
 It compares:
 
@@ -27,6 +30,8 @@ It compares:
 - The row at 90% of the table.
 - The 1,000th distinct score.
 - The 90% row after all ranks have been materialized.
+
+One local run is recorded in [`result/2026-09-01-postgresql-17-darwin-arm64.md`](result/2026-09-01-postgresql-17-darwin-arm64.md).
 
 ## Expected Shape
 

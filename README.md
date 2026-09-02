@@ -23,6 +23,8 @@ topics/
     sync-map/
   database/
     table-growth/
+    uuid-primary-keys/
+    kth-largest/
   cache/
 ```
 
@@ -43,6 +45,8 @@ Each topic should generally cover:
 
 - [Go sync map](topics/go/sync-map/): Compare several concurrent map strategies under different read/write ratios, key distributions, and hot-key access patterns.
 - [Database table growth](topics/database/table-growth/): Understand why queries, indexes, pagination, and maintenance work become more complex as relational database tables grow.
+- [UUID primary keys](topics/database/uuid-primary-keys/): Separate the storage cost of wider keys from the B-tree locality cost of random insertion.
+- [Finding the x-th largest](topics/database/kth-largest/): Compare indexed offsets, distinct-value ranking, and materialized ranks.
 - [Cache](topics/cache/): Track common cache behaviors and practices, such as cache penetration, cache breakdown, cache avalanche, and hot keys.
 
 ## Writing Principles

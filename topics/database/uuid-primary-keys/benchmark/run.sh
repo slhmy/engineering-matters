@@ -18,7 +18,7 @@ fi
 docker compose up -d --wait
 docker compose exec -T postgres psql \
   --username postgres \
-  --dbname table_growth \
+  --dbname uuid_primary_keys \
   --set ON_ERROR_STOP=1 \
   --set rows="$ROWS" \
   --file /benchmark/run.sql

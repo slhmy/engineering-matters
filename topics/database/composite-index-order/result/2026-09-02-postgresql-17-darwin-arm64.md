@@ -2,6 +2,8 @@
 
 These are local observations from the first PostgreSQL run. They document plan shape and visited work, not universal latency ratios.
 
+The equivalent [MySQL 8.4 run](2026-09-02-mysql-8-darwin-arm64.md) is recorded separately so engine-specific metrics are not mixed into one performance table.
+
 ## Environment
 
 - Date: 2026-09-02

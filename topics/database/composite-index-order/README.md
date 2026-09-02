@@ -18,7 +18,7 @@ The useful question is not only "does the index contain this column?" It is "doe
 
 ## Experiment
 
-The runnable PostgreSQL experiment is in [`benchmark/`](benchmark/). It creates deterministic events for 1,000 tenants and seven statuses, then ensures only one candidate composite index exists for each case.
+The runnable experiment is in [`benchmark/`](benchmark/). PostgreSQL 17.6 and MySQL 8.4.6 receive the same deterministic events for 1,000 tenants and seven statuses. Each case keeps only one candidate composite index so another index cannot hide the effect of column order.
 
 Run it with:
 
@@ -26,6 +26,8 @@ Run it with:
 cd topics/database/composite-index-order/benchmark
 ./run.sh 100000
 ./run.sh 1000000
+./run-mysql.sh 100000
+./run-mysql.sh 1000000
 docker compose down
 ```
 
@@ -37,7 +39,7 @@ The matrix compares:
 | One tenant and one status, latest 10 events | `(tenant_id, status, created_at DESC, id DESC)` vs `(status, tenant_id, created_at DESC, id DESC)` |
 | Count one tenant without a status condition | The same two equality-column orders |
 
-Observe `Index Cond`, scan type, actual rows, buffers, and whether a sort appears. One local run is recorded in [`result/2026-09-02-postgresql-17-darwin-arm64.md`](result/2026-09-02-postgresql-17-darwin-arm64.md).
+For PostgreSQL, observe `Index Cond`, scan type, actual rows, shared buffers, and whether a sort appears. For MySQL, observe iterator type, lookup keys, actual rows entering filters, and whether sorting appears. Local runs are recorded for [PostgreSQL 17.6](result/2026-09-02-postgresql-17-darwin-arm64.md) and [MySQL 8.4.6](result/2026-09-02-mysql-8-darwin-arm64.md).
 
 ## Experiment And Result Interpretation
 
@@ -49,9 +51,24 @@ Observe `Index Cond`, scan type, actual rows, buffers, and whether a sort appear
 
 Interpret column order against the whole query portfolio. The best index for one fully constrained query can be a poor index for a related prefix query.
 
+### Engine Comparison
+
+The broad principles matched, but the optimizers exposed different fallback paths:
+
+| Query and index | PostgreSQL 17.6 | MySQL 8.4.6 |
+| --- | --- | --- |
+| Tenant feed, tenant first | Index-only scan over one tenant range; 4 buffers | Covering index lookup; 50 entries returned |
+| Tenant feed, time first | Index-only scan with a later-column `Index Cond`; 247 buffers | Covering index scan of 49,501 entries, then filter to 50 |
+| Tenant + status, either equality order | Tight index-only scan; 4 buffers | Tight covering index lookup; 10 entries returned |
+| Tenant count, status first | Parallel sequential scan of one million rows | Covering index skip scan returning 1,000 tenant entries |
+
+MySQL's skip scan repeatedly probes the index for each distinct value of the missing leading `status` column. It is attractive here because `status` has only seven values. If the missing prefix had high cardinality, repeated probes could become expensive and the optimizer could choose another plan.
+
+Do not compare PostgreSQL buffer counts directly with MySQL iterator row counts, or use these timings to rank engines. Their storage structures, caches, instrumentation, and container processes differ. Compare how each plan's work changes when column order or row count changes within the same engine.
+
 ## Source And Pseudocode Walkthrough
 
-The complete experiment is [`benchmark/sql/run.sql`](benchmark/sql/run.sql). The first comparison keeps the query fixed:
+The PostgreSQL source is [`benchmark/sql/run.sql`](benchmark/sql/run.sql), and the equivalent MySQL source is [`benchmark/sql/mysql.sql`](benchmark/sql/mysql.sql). The first comparison keeps the query fixed:
 
 ```sql
 SELECT id, created_at
@@ -76,7 +93,7 @@ read the first 50 entries in descending time order
 stop
 ```
 
-With time first, the index provides the requested global time order, but one tenant's rows are interleaved with other tenants. PostgreSQL can still apply `tenant_id` inside an index scan; it simply cannot describe the same tight tenant range. This is why "a later column can never be used" is too strong even though the leading order still controls scan efficiency.
+With time first, the index provides the requested global time order, but one tenant's rows are interleaved with other tenants. PostgreSQL still displays `tenant_id` as an `Index Cond`; MySQL displays a covering index scan followed by a filter. Neither engine gets the same tight tenant range. This is why "a later column can never be used" is too strong even though the leading order still controls scan efficiency.
 
 The equality-order comparison uses:
 
@@ -93,13 +110,16 @@ For a B-tree, equality on leading columns narrows the scan to one prefix. The fi
 
 `ORDER BY` changes the decision. An index can avoid sorting only when its ordering is compatible after accounting for fixed equality columns. In `(tenant_id, created_at DESC, id DESC)`, fixing one tenant leaves entries ordered exactly as the feed needs. A unique `id` tie-breaker makes pagination and result order deterministic.
 
-PostgreSQL chooses plans by estimated cost, not by a binary leftmost-prefix rule. Depending on distribution and version, it may use a later-column condition in an index scan, use skip-scan-like repeated searches, scan a broad part of an index, or prefer a sequential scan. `EXPLAIN (ANALYZE, BUFFERS)` reveals which behavior occurred.
+Both engines choose plans by estimated cost, not by a binary leftmost-prefix rule. PostgreSQL 17 chose a broad index path for the time-first feed and a sequential scan for the missing-status tenant count. MySQL 8.4 made the broad time-first scan explicit, but used skip scan when only seven leading status values had to be enumerated. Use `EXPLAIN (ANALYZE, BUFFERS)` in PostgreSQL and `EXPLAIN ANALYZE` in MySQL to identify the actual fallback.
+
+The phrase "covering index" also hides an engine difference. PostgreSQL index entries point to heap tuples, and an index-only scan still depends on the visibility map. InnoDB secondary-index leaves contain the primary-key value and can satisfy these selected columns from the index. That implementation difference is another reason to compare plan shape rather than raw cross-engine timing.
 
 ## Boundaries
 
 - Do not choose index order from per-column selectivity alone. Equality combinations, ranges, ordering, grouping, and omitted predicates all matter.
 - More indexes can support more query shapes, but every index consumes storage, WAL, cache, and write maintenance.
 - This experiment uses uniform tenants. Hot tenants, sparse tenants, correlated columns, and stale statistics can change planner estimates and useful order.
+- Skip scan availability and costing depend on database engine and version; it should not be assumed from generic B-tree theory alone.
 - `IN`, multiple ranges, nullable columns, mixed sort directions, and partial indexes deserve separate experiments.
 - Index-only scans rely on visibility-map state. Active updates can add heap fetches even with the same column order.
 

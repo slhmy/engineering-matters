@@ -9,7 +9,7 @@ These labs examine how relational database choices behave as data volume or acce
 | [Table growth](table-growth/) | More rows make previously cheap access paths visible. | Sequential scan vs indexed lookup; deep `OFFSET` vs cursor pagination |
 | [UUID primary keys](uuid-primary-keys/) | Identifier width and insertion order affect B-tree maintenance. | Sequential `bigint`, ordered UUID, and random UUID |
 | [Finding the x-th largest](kth-largest/) | An ordered index does not directly provide arbitrary row ranks. | Shallow/deep index offsets, distinct values, and materialized ranks |
-| [Composite index column order](composite-index-order/) | The same columns can produce very different scan ranges when their order changes. | Leading equality prefixes, omitted predicates, and `ORDER BY` compatibility |
+| [Composite index column order](composite-index-order/) | The same columns can produce different scan ranges and optimizer fallbacks across engines. | PostgreSQL/MySQL leading prefixes, skip scan, omitted predicates, and `ORDER BY` compatibility |
 
 The topics are related but not interchangeable. Table size is an input to these experiments; the decision under study is different in each one.
 

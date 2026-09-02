@@ -15,7 +15,7 @@ if [ "$ROWS" -lt 10000 ]; then
   exit 2
 fi
 
-docker compose up -d --wait
+docker compose up -d --wait postgres
 docker compose exec -T postgres psql \
   --username postgres \
   --dbname composite_index_order \

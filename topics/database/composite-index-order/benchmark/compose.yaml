@@ -18,3 +18,20 @@ services:
       - /var/lib/postgresql/data
     volumes:
       - ./sql:/benchmark:ro
+
+  mysql:
+    image: mysql:8.4.6
+    environment:
+      MYSQL_DATABASE: composite_index_order
+      MYSQL_ROOT_PASSWORD: root
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -proot --silent"]
+      interval: 1s
+      timeout: 5s
+      retries: 60
+    ports:
+      - "127.0.0.1:15436:3306"
+    tmpfs:
+      - /var/lib/mysql
+    volumes:
+      - ./sql:/benchmark:ro

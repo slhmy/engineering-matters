@@ -112,6 +112,17 @@ Do not read this kind of benchmark as a single "which row is fastest" ranking. R
 - When every goroutine writes the same hot key, the local lock and allocation costs of `sync.Map` become visible.
 - When the workload keeps inserting new keys, `sync.Map` is no longer only hitting its stable read path.
 
+## Experiment And Result Interpretation
+
+| Change | Observe | Interpretation |
+| --- | --- | --- |
+| Raise `-cpu` from 1 to 8 on stable, read-heavy keys | `sync.Map` and maps that permit parallel reads improve relative to one global exclusive lock. | Concurrency mechanisms pay overhead at low contention but can avoid serialization when independent operations overlap. |
+| Increase the write ratio while keeping keys distributed | The advantage of `RWMutex` narrows, while sharding and `sync.Map` can still let unrelated keys progress independently. | Write percentage is not contention by itself; key distribution determines whether operations meet at the same synchronization point. |
+| Concentrate writes on one hot key | Implementations converge toward serialized behavior; `syncmap` reached about 107.7 ns/op in the local 8-CPU hot-write run. | A concurrent data structure cannot parallelize conflicting updates to the same logical value. Shards only help when requests reach different shards. |
+| Insert a new key on every write | `syncmap` reported 3 allocations per operation in the local run. | Stable-key lookup and continual growth exercise different internal paths; allocation and trie expansion become part of the cost. |
+
+Do not select the globally fastest row. Match the result slice to the application's read/write ratio, key stability, key distribution, and concurrency level.
+
 ## Explanation
 
 `sync.Map` is usually better suited to read-heavy workloads where keys are relatively stable and each key is written once but read many times. Its goal is not to replace every `map + lock` implementation; it targets the two common patterns described by the standard library documentation: write-once-read-many, and multiple goroutines reading or writing mostly disjoint key sets.

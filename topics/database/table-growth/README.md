@@ -34,7 +34,17 @@ The experiment varies row count (`100000` and `1000000`) while keeping the data 
 
 One local run is recorded in [`result/2026-09-01-postgresql-17-darwin-arm64.md`](result/2026-09-01-postgresql-17-darwin-arm64.md). Run the benchmark on your own environment before using the numbers to make a capacity decision.
 
-### Expected Shape
+## Experiment And Result Interpretation
+
+| Change | Observe | Interpretation |
+| --- | --- | --- |
+| Grow from 100,000 to 1,000,000 rows without a lookup index | Visited buffers grew from 1,725 to 17,242; PostgreSQL changed from `Seq Scan` to `Parallel Seq Scan`. | A missing access path makes work follow table size. Growth can change the plan shape, not only its duration. |
+| Add `orders_customer_id_idx` | The one-million-row lookup visited about 100 matching heap blocks instead of scanning the table. | A selective index changes work from "inspect all rows" to "navigate to matching keys," at the cost of storage and write maintenance. |
+| Move the requested page near the end | `OFFSET` produced 999,050 index entries to return 50 rows; the cursor produced 50 and visited 4 buffers. | An ordered index removes sorting, but `OFFSET` still walks and discards preceding entries. A cursor supplies a range boundary so the scan can start near the target. |
+
+Read these as growth curves, not absolute latency claims. The principle is that query cost follows the amount of data the chosen access path must visit.
+
+## Detailed Explanation
 
 Without an index, the lookup has to inspect the table until it finds qualifying rows. An index changes that work into an index traversal plus row lookups, which is usually a better trade when the predicate is selective enough. The index is not free: it consumes space and must be maintained by writes.
 

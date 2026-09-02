@@ -33,7 +33,17 @@ It compares:
 
 One local run is recorded in [`result/2026-09-01-postgresql-17-darwin-arm64.md`](result/2026-09-01-postgresql-17-darwin-arm64.md).
 
-## Expected Shape
+## Experiment And Result Interpretation
+
+| Change | Observe | Interpretation |
+| --- | --- | --- |
+| Move from the 100th to the 900,000th ordered row | The index-only scan consumed 100 versus 900,000 entries. | A B-tree provides order but not subtree row counts, so `OFFSET x - 1` still performs work proportional to x. |
+| Ask for the 1,000th distinct score | PostgreSQL consumed 99,901 index entries because many rows shared each score. | Distinct-value rank depends on both x and duplicate frequency; its semantics and cost differ from the x-th row. |
+| Materialize `row_number()` and index `rank` | Rank 900,000 became a one-row, 4-buffer lookup, while the materialized table and index used 71 MB. | Precomputation moves work from reads to refreshes and storage. It fits repeated rank lookups only when freshness requirements tolerate that trade. |
+
+The first question is semantic: decide whether ties mean `row_number()`, `rank()`, `dense_rank()`, or a distinct value. Only then does the execution-plan comparison answer the right problem.
+
+## Detailed Explanation
 
 A normal PostgreSQL B-tree stores ordered keys, but it does not expose subtree row counts for direct order-statistic lookup. `OFFSET x - 1 LIMIT 1` can avoid sorting when a suitable index exists, yet the index scan still produces approximately x entries before `Limit` returns one. Cost therefore grows with x, not only with table size.
 

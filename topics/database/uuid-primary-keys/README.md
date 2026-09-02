@@ -35,7 +35,17 @@ Inspect:
 
 One local run is recorded in [`result/2026-09-01-postgresql-17-darwin-arm64.md`](result/2026-09-01-postgresql-17-darwin-arm64.md).
 
-## Expected Shape
+## Experiment And Result Interpretation
+
+| Change | Observe | Interpretation |
+| --- | --- | --- |
+| Replace sequential `bigint` with an ordered synthetic UUID | At one million rows, the table grew from 120 MB to 128 MB and the primary-key index from 21 MB to 30 MB. | Even with the same insertion locality, a 16-byte UUID makes table tuples and B-tree entries wider than an 8-byte `bigint`. |
+| Randomize UUID insertion order | The UUID primary-key index grew from 30 MB to 38 MB and generated more WAL in this run. | Inserts spread across B-tree leaves instead of concentrating on the right edge, increasing page maintenance and reducing packing efficiency. |
+| Perform a warm point lookup | All three primary keys visited about 4 buffers. | Hot point-query latency can look similar while indexes have comparable height; it does not reveal storage, WAL, or sustained-write costs. |
+
+Use relation size and WAL as the primary signals in this experiment. One fixed-order bulk insert time is too sensitive to cache and checkpoint timing to rank identifier strategies.
+
+## Detailed Explanation
 
 The ordered UUID index should generally be larger than the `bigint` index because every key and internal separator is wider. The random UUID index may be larger again because incremental random insertion tends to leave pages less densely packed and causes more page splits.
 

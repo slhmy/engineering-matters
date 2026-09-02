@@ -44,6 +44,39 @@ One local run is recorded in [`result/2026-09-01-postgresql-17-darwin-arm64.md`]
 
 Read these as growth curves, not absolute latency claims. The principle is that query cost follows the amount of data the chosen access path must visit.
 
+## Source And Pseudocode Walkthrough
+
+The complete experiment is [`benchmark/sql/run.sql`](benchmark/sql/run.sql). The lookup query stays unchanged while the experiment adds one access path:
+
+```sql
+SELECT id, created_at, payload
+FROM orders
+WHERE customer_id = :customer_id;
+
+CREATE INDEX orders_customer_id_idx ON orders (customer_id);
+```
+
+Before the index exists, PostgreSQL has no structure ordered by `customer_id`, so its practical algorithm is `for each row: test customer_id`. After the index exists, it can descend the B-tree to `:customer_id`, read the matching index entries, and fetch only their heap rows. The SQL result is the same; the amount of visited data changes.
+
+The pagination cases use the same `(created_at, id)` order but encode the starting position differently:
+
+```sql
+-- Walk from the beginning and discard preceding entries.
+SELECT id, created_at
+FROM orders
+ORDER BY created_at, id
+LIMIT 50 OFFSET :position;
+
+-- Seek to a known boundary and continue from there.
+SELECT id, created_at
+FROM orders
+WHERE (created_at, id) > (:cursor_time, :cursor_id)
+ORDER BY created_at, id
+LIMIT 50;
+```
+
+The tuple comparison is lexicographic: compare `created_at` first, then use `id` to break ties. It matches the index column order, so the cursor path is approximately `B-tree seek + 50 next entries`; the offset path is `first entry + position skips + 50 next entries`. Removing `id` would make equal timestamps ambiguous and could cause skipped or repeated rows between pages.
+
 ## Detailed Explanation
 
 Without an index, the lookup has to inspect the table until it finds qualifying rows. An index changes that work into an index traversal plus row lookups, which is usually a better trade when the predicate is selective enough. The index is not free: it consumes space and must be maintained by writes.

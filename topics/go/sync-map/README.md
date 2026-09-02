@@ -133,9 +133,27 @@ Do not select the globally fastest row. Match the result slice to the applicatio
 
 A sharded map can reduce contention on a single lock, but it adds implementation complexity and depends on a suitable hash function and shard count. A third-party library such as `orcaman/concurrent-map` can remove some maintenance burden, but it is still a sharded-map design rather than a universally better replacement for `sync.Map`.
 
-## Source Walkthrough
+## Source And Pseudocode Walkthrough
 
 The benchmark uses Go 1.26.6. In this version, `sync.Map` is implemented with a concurrent hash trie. This is different from the `readOnly` and `dirty` dual-map implementation described by many older articles.
+
+Before reading the implementation details, use this conceptual path:
+
+```text
+Load(key):
+    hash key
+    atomically follow one trie child per 4 hash bits
+    if the leaf key matches, atomically read its value
+    otherwise report missing
+
+Store(key, value):
+    hash key and follow the trie toward its leaf
+    lock the local mutation node
+    replace the matching entry, or install/expand nodes for a new key
+    unlock the local node
+```
+
+This is not literal Go source; it highlights the synchronization boundary. A steady-state `Load` traverses atomic pointers without taking a mutex. Writes that reach different trie regions may lock different local nodes, while writes to one hot key converge on the same node and serialize. New keys can also allocate entries and expand branches, which connects directly to the benchmark's hot-key and new-key results.
 
 ### Public Wrapper
 

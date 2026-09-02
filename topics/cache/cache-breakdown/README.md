@@ -82,6 +82,50 @@ The experiment waits for SWR's background refresh before collecting origin metri
 
 Read these signals together. A strategy that makes only one origin call is not automatically acceptable if all callers wait too long, and a low-latency stale response is not automatically acceptable for data requiring read-after-write freshness.
 
+## Source And Pseudocode Walkthrough
+
+The complete implementation is [`benchmark/main.go`](benchmark/main.go). Its central branch is equivalent to:
+
+```go
+entry, ok := cache.lookup()
+if ok && entry.isFresh() {
+	return entry.value
+}
+
+switch strategy {
+case naive:
+	return loadOriginAndStore()
+case singleflight:
+	return loadOnce()
+case swr:
+	if ok {
+		refreshInBackgroundOnce()
+		return entry.value
+	}
+	return loadOnce()
+}
+```
+
+All three strategies share the same fresh-hit path. Their behavior diverges only after expiry: `naive` provides no coordination, `singleflight` blocks on shared work, and SWR can return only when an old value still exists. A cold miss therefore cannot use the stale fast path.
+
+The local singleflight implementation publishes one in-flight call and gives waiters its completion channel:
+
+```text
+lock load state
+if a call exists:
+    unlock, wait for call.done, return call.value
+recheck cache while coordinated
+publish a new call, then unlock
+
+value = origin.load()
+store value
+clear the call and close call.done
+```
+
+The second cache check matters because another loader may have refreshed the value before this request acquired `loadMu`. Publishing the call before invoking the origin ensures later misses join the same work. Closing `done` releases all waiters only after the value has been stored.
+
+SWR uses a separate `refreshing` flag to admit one background goroutine. Other callers see the flag, skip starting another refresh, and immediately return the stale entry. This explains both observed signals: one origin call and near-zero request wait, purchased with stale responses.
+
 ## Why It Happens
 
 An expired cache entry does not serialize readers. If 100 requests arrive during a 100 ms origin query, the naive read path can start 100 copies of that query. A database connection pool may cap actual database concurrency, but that changes the failure shape into queued requests and pool exhaustion rather than removing duplicate work.

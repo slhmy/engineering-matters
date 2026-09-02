@@ -24,6 +24,7 @@ Each topic should generally cover:
 - Experiment: how to design the variables and observations.
 - Results: experiment output and observed behavior.
 - Experiment and result interpretation: a short table connecting changed variables, observed signals, and the mechanism that explains them.
+- Source and pseudocode walkthrough: minimal real or illustrative snippets that connect code paths to the observed mechanism.
 - Explanation: why the behavior happens.
 - Boundaries: when each choice is suitable or unsuitable.
 - Misconceptions: where the topic is often misunderstood or overused.

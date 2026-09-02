@@ -16,7 +16,7 @@ The cache category records common cache behaviors, risks, and practices in backe
 
 ## Experiment And Result Interpretation
 
-The first runnable lab should keep origin latency and request rate fixed, then change one cache condition at a time. Until that lab exists, the following are expected signals rather than observed repository results.
+Cache labs should keep origin latency and request rate fixed, then change one cache condition at a time. The expired-hot-key row is covered by the runnable cache-breakdown lab; the other rows remain expected signals for planned topics.
 
 | Change | Observe | Interpretation |
 | --- | --- | --- |
@@ -25,6 +25,22 @@ The first runnable lab should keep origin latency and request rate fixed, then c
 | Expire many keys at the same time, then add TTL jitter | Origin request-rate distribution over time | Jitter spreads refresh work rather than removing it. A lower peak with similar total work demonstrates load shaping, not free capacity. |
 
 Result interpretation should compare origin work, tail latency, and stale-data behavior together. A higher cache hit ratio alone does not explain whether the system is safer during expiry or failure.
+
+## Source And Pseudocode Walkthrough
+
+Most cache-aside failure modes begin with the same small read path:
+
+```text
+entry = cache.get(key)
+if entry is fresh:
+    return entry.value
+
+value = origin.load(key)
+cache.set(key, value, ttl)
+return value
+```
+
+The important behavior is hidden between "not fresh" and `origin.load`: how many requests can enter that interval, whether they coordinate by key, whether stale data can be served, and whether nonexistent values are cached. The [cache breakdown source walkthrough](cache-breakdown/#source-and-pseudocode-walkthrough) makes those choices explicit for one hot expired key.
 
 ## Writing Style
 

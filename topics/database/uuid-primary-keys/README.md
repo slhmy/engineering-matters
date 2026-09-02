@@ -45,6 +45,35 @@ One local run is recorded in [`result/2026-09-01-postgresql-17-darwin-arm64.md`]
 
 Use relation size and WAL as the primary signals in this experiment. One fixed-order bulk insert time is too sensitive to cache and checkpoint timing to rank identifier strategies.
 
+## Source And Pseudocode Walkthrough
+
+The complete experiment is [`benchmark/sql/run.sql`](benchmark/sql/run.sql). It generates all key forms before measuring insertion:
+
+```sql
+SELECT
+    id AS source_id,
+    id AS bigint_id,
+    lpad(to_hex(id), 32, '0')::uuid AS ordered_uuid,
+    md5('table-growth-' || id)::uuid AS random_uuid
+FROM generate_series(1, :rows::bigint) AS id;
+```
+
+`ordered_uuid` preserves the numeric order of `id`; it isolates the cost of changing an 8-byte key into a 16-byte key. `random_uuid` deterministically scrambles the same source IDs, giving repeatable random B-tree positions. Pre-generating both values keeps UUID construction and hashing outside the measured insert.
+
+All targets then receive rows in the same `source_id` order:
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS, WAL, TIMING OFF)
+INSERT INTO ordered_uuid_ids
+SELECT ordered_uuid, payload FROM id_source ORDER BY source_id;
+
+EXPLAIN (ANALYZE, BUFFERS, WAL, TIMING OFF)
+INSERT INTO random_uuid_ids
+SELECT random_uuid, payload FROM id_source ORDER BY source_id;
+```
+
+The first insert repeatedly reaches the right side of the UUID B-tree because key order follows arrival order. The second receives the same arrivals but routes each key to a different leaf according to its UUID value. `BUFFERS` reveals page activity, `WAL` reveals logged write volume, and `pg_indexes_size` captures the final packing outcome. This control is why a difference can be attributed mainly to insertion locality rather than ID-generation CPU time.
+
 ## Detailed Explanation
 
 The ordered UUID index should generally be larger than the `bigint` index because every key and internal separator is wider. The random UUID index may be larger again because incremental random insertion tends to leave pages less densely packed and causes more page splits.

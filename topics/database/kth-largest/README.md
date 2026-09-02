@@ -43,6 +43,53 @@ One local run is recorded in [`result/2026-09-01-postgresql-17-darwin-arm64.md`]
 
 The first question is semantic: decide whether ties mean `row_number()`, `rank()`, `dense_rank()`, or a distinct value. Only then does the execution-plan comparison answer the right problem.
 
+## Source And Pseudocode Walkthrough
+
+The complete experiment is [`benchmark/sql/run.sql`](benchmark/sql/run.sql). A composite index defines both score order and deterministic tie order:
+
+```sql
+CREATE INDEX scores_rank_idx ON scores (score DESC, id ASC);
+
+SELECT id, score
+FROM scores
+ORDER BY score DESC, id ASC
+LIMIT 1 OFFSET :x - 1;
+```
+
+The index lets PostgreSQL emit rows in the requested order without sorting. It does not store "rows below this branch" counters, so execution is still equivalent to:
+
+```text
+position = 0
+for entry in scores_rank_idx:
+    position += 1
+    if position == x:
+        return entry
+```
+
+The distinct-value version adds another state transition: entries with the same score are consumed but advance the distinct position only once.
+
+```sql
+SELECT DISTINCT score
+FROM scores
+ORDER BY score DESC
+LIMIT 1 OFFSET :x - 1;
+```
+
+The materialized alternative performs that scan ahead of time and stores the result of `row_number()`:
+
+```sql
+CREATE TABLE ranked_scores AS
+SELECT row_number() OVER (ORDER BY score DESC, id ASC) AS rank,
+       id,
+       score
+FROM scores;
+
+ALTER TABLE ranked_scores ADD PRIMARY KEY (rank);
+SELECT id, score FROM ranked_scores WHERE rank = :x;
+```
+
+The final query is a B-tree point lookup on `rank`, but every score change can invalidate many stored ranks. The code makes the trade explicit: replace repeated scan work with rebuild work, additional storage, and a freshness policy.
+
 ## Detailed Explanation
 
 A normal PostgreSQL B-tree stores ordered keys, but it does not expose subtree row counts for direct order-statistic lookup. `OFFSET x - 1 LIMIT 1` can avoid sorting when a suitable index exists, yet the index scan still produces approximately x entries before `Limit` returns one. Cost therefore grows with x, not only with table size.

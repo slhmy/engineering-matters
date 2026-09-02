@@ -1,0 +1,20 @@
+name: point-vs-range-scan
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: point_vs_range_scan
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+    ports:
+      - "127.0.0.1:15438:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ./sql:/benchmark:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d point_vs_range_scan"]
+      interval: 1s
+      timeout: 5s
+      retries: 30

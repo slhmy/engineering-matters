@@ -23,6 +23,9 @@ topics/
     sync-map/
   database/
     table-growth/
+    index-selectivity/
+    point-vs-range-scan/
+    sorting-and-limit/
     uuid-primary-keys/
     kth-largest/
     composite-index-order/
@@ -46,6 +49,9 @@ Each topic should generally cover:
 
 - [Go sync map](topics/go/sync-map/): Compare several concurrent map strategies under different read/write ratios, key distributions, and hot-key access patterns.
 - [Database table growth](topics/database/table-growth/): Understand why queries, indexes, pagination, and maintenance work become more complex as relational database tables grow.
+- [Index selectivity](topics/database/index-selectivity/): Observe why an existing index can lose to a sequential scan as more rows match.
+- [Point lookup versus range scan](topics/database/point-vs-range-scan/): Separate the cost of finding a range boundary from reading and returning the range.
+- [Sorting and LIMIT](topics/database/sorting-and-limit/): Compare top-N sorting, full sorting, and early stop through an order-compatible index.
 - [UUID primary keys](topics/database/uuid-primary-keys/): Separate the storage cost of wider keys from the B-tree locality cost of random insertion.
 - [Finding the x-th largest](topics/database/kth-largest/): Compare indexed offsets, distinct-value ranking, and materialized ranks.
 - [Composite index column order](topics/database/composite-index-order/): Understand how equality prefixes, omitted predicates, and ordering requirements determine useful index column order.

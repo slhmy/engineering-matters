@@ -7,6 +7,9 @@ These labs examine how relational database choices behave as data volume or acce
 | Topic | Engineering pressure | Main comparison |
 | --- | --- | --- |
 | [Table growth](table-growth/) | More rows make previously cheap access paths visible. | Sequential scan vs indexed lookup; deep `OFFSET` vs cursor pagination |
+| [Index selectivity](index-selectivity/) | An indexed predicate can still match too much of the table to save work. | Bitmap heap scan vs sequential scan across six match ratios |
+| [Point lookup versus range scan](point-vs-range-scan/) | A cheap B-tree seek does not eliminate the cost of reading a large range. | One row, fixed range, and 1%/10%/50% ranges |
+| [Sorting and LIMIT](sorting-and-limit/) | A small output limit does not always permit an early stop. | Top-N heap, full sort, and ordered index scan |
 | [UUID primary keys](uuid-primary-keys/) | Identifier width and insertion order affect B-tree maintenance. | Sequential `bigint`, ordered UUID, and random UUID |
 | [Finding the x-th largest](kth-largest/) | An ordered index does not directly provide arbitrary row ranks. | Shallow/deep index offsets, distinct values, and materialized ranks |
 | [Composite index column order](composite-index-order/) | The same columns can produce different scan ranges and optimizer fallbacks across engines. | PostgreSQL/MySQL leading prefixes, skip scan, omitted predicates, and `ORDER BY` compatibility |

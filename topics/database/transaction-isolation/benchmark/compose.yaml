@@ -1,0 +1,20 @@
+name: transaction-isolation
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: transaction_isolation
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d transaction_isolation"]
+      interval: 1s
+      timeout: 5s
+      retries: 30
+    ports:
+      - "127.0.0.1:15440:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ./sql:/benchmark:ro

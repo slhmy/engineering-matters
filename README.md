@@ -26,6 +26,8 @@ topics/
     index-selectivity/
     point-vs-range-scan/
     sorting-and-limit/
+    transaction-isolation/
+    row-locking/
     uuid-primary-keys/
     kth-largest/
     composite-index-order/
@@ -52,6 +54,8 @@ Each topic should generally cover:
 - [Index selectivity](topics/database/index-selectivity/): Observe why an existing index can lose to a sequential scan as more rows match.
 - [Point lookup versus range scan](topics/database/point-vs-range-scan/): Separate the cost of finding a range boundary from reading and returning the range.
 - [Sorting and LIMIT](topics/database/sorting-and-limit/): Compare top-N sorting, full sorting, and early stop through an order-compatible index.
+- [Transaction isolation](topics/database/transaction-isolation/): Reproduce changing snapshots, write skew, and serialization failures with controlled concurrent sessions.
+- [Row locking](topics/database/row-locking/): Observe row-level waiting, `NOWAIT`, `SKIP LOCKED`, and deadlock recovery.
 - [UUID primary keys](topics/database/uuid-primary-keys/): Separate the storage cost of wider keys from the B-tree locality cost of random insertion.
 - [Finding the x-th largest](topics/database/kth-largest/): Compare indexed offsets, distinct-value ranking, and materialized ranks.
 - [Composite index column order](topics/database/composite-index-order/): Understand how equality prefixes, omitted predicates, and ordering requirements determine useful index column order.

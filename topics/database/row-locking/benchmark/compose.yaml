@@ -1,0 +1,20 @@
+name: row-locking
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: row_locking
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d row_locking"]
+      interval: 1s
+      timeout: 5s
+      retries: 30
+    ports:
+      - "127.0.0.1:15441:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ./sql:/benchmark:ro

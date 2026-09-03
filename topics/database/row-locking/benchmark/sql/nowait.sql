@@ -1,0 +1,4 @@
+\timing on
+BEGIN;
+SELECT id FROM accounts WHERE id = 1 FOR UPDATE NOWAIT;
+COMMIT;

@@ -7,10 +7,10 @@ The cache category records common cache behaviors, risks, and practices in backe
 - [Cache breakdown](cache-breakdown/): Compare naive cache-aside, request coalescing, and stale-while-revalidate when concurrent requests observe one expired hot key.
 - [Cache avalanche](cache-avalanche/): Compare aligned expiry, random TTL jitter, and deliberate staggering under unlimited and capacity-limited origins.
 - [Cache penetration](cache-penetration/): Compare negative caching, Bloom Filter sizes, and their combination under repeated and high-cardinality nonexistent-key traffic.
+- [Hot keys](hot-keys/): Compare uniform and skewed traffic across hash-sharded nodes, then replicate identified read-hot keys.
 
 ## Planned Topics
 
-- Hot keys: a small number of keys receive extremely high traffic.
 - Cache consistency: timing problems between writing the database and deleting or updating the cache.
 - Local cache vs distributed cache: tradeoffs among latency, capacity, and consistency.
 

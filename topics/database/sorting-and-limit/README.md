@@ -43,14 +43,14 @@ The selected columns remain exactly `id, created_at` in all cases. They are pres
 
 ## Experiment And Result Interpretation
 
-| Change | Observe | Interpretation |
+| Change | Observe in the local run | Interpretation |
 | --- | --- | --- |
-| No index, reduce the limit from the full tenant set to 50 | PostgreSQL uses top-N heapsort, but the sequential scan still examines the whole table. | `LIMIT` bounds retained sort state; it does not let an unordered scan know which unseen row might rank first. |
-| No index, request every qualifying row | PostgreSQL uses a full sort rather than top-N heapsort. | When N approaches the candidate count, all qualifying tuples must be retained and ordered. Memory limits can turn this into an external merge using temporary storage. |
-| Add the matching composite index with `LIMIT 50` | The sort disappears and the index-only scan emits only 50 rows. | Equality on the leading tenant column creates one range whose remaining key order exactly matches the query, allowing early stop. |
-| Keep the index but use the large limit | The index-only scan emits 10,000 or 100,000 rows and visits correspondingly more buffers. | An index removes the explicit sort, not the cost of consuming and returning a large result. The advantage over scan-and-sort narrows as N grows. |
+| No index, reduce the limit from the full tenant set to 50 | Top-N heapsort kept only 50 tuples, yet the scan still read 1,725 buffers (100,000 rows) or 17,368 buffers (1,000,000 rows). | `LIMIT` bounds retained sort state; it does not let an unordered scan know which unseen row might rank first. |
+| No index, request every qualifying row | Sort method switched from top-N heapsort to quicksort, and the million-row time rose from 13.648 ms to 24.334 ms at the same 17,368 buffers. | When N approaches the candidate count, all qualifying tuples must be retained and ordered. Memory limits can turn this into an external merge using temporary storage. |
+| Add the matching composite index with `LIMIT 50` | The sort disappeared and the index-only scan emitted exactly 50 entries from 4 or 5 buffers. | Equality on the leading tenant column creates one range whose remaining key order exactly matches the query, allowing early stop. |
+| Keep the index but use the large limit | The same plan emitted 10,000 entries from 54 buffers, or 100,000 from 496. | An index removes the explicit sort, not the cost of consuming and returning a large result. The advantage over scan-and-sort narrows as N grows. |
 
-The recorded run should be read primarily by plan shape, rows consumed, sort method, and buffers. Execution times are local observations on warm `tmpfs`, not portable ratios.
+Read the `Rows entering sort or index entries emitted` column next to `Shared buffers`: the no-index cases show constant buffer work while the sort method and retained memory change, and the indexed cases show work that grows with N. The `LIMIT` value alone does not determine which happens, so read the run primarily by plan shape, rows consumed, sort method, and buffers. Execution times are local observations on warm `tmpfs`, not portable ratios.
 
 ## Source And Pseudocode Walkthrough
 

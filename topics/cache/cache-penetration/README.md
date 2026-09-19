@@ -80,12 +80,57 @@ A local default run is recorded in [`result/2026-09-02-darwin-arm64.md`](result/
 
 ## Experiment And Result Interpretation
 
-| Change | Observe | Interpretation |
+The default run is recorded in [`result/2026-09-02-darwin-arm64.md`](result/2026-09-02-darwin-arm64.md). Read the `repeated` and `unique` halves separately, because the same strategy can behave very differently in each.
+
+| Change | Observe in the local run | Interpretation |
 | --- | --- | --- |
-| Reuse 100 nonexistent keys with negative caching | Origin calls fall from 10,000 to 100, followed by 9,900 negative hits. | A negative entry amortizes its first origin lookup only when the same key is requested again before that entry expires. |
-| Make all 10,000 nonexistent keys unique | Negative caching still makes 10,000 origin calls and retains 10,000 entries. | Negative caching does not protect the first request for each key; high-cardinality input can turn it into memory pressure. |
-| Raise Bloom memory from 4 to 12 bits per valid key | Observed false positives and origin calls fall. | Bloom memory controls a probability tradeoff, not a binary enabled/disabled property. |
-| Combine Bloom and negative caching on repeated misses | Bloom rejects definite misses; negative markers absorb repeated false positives. | The mechanisms address different paths and can be complementary. |
+| Reuse 100 nonexistent keys with negative caching | Origin calls fell from 10,000 to 100, followed by 9,900 `Negative hits`, with 100 negative entries. | A negative entry amortizes its first origin lookup only when the same key is requested again before that entry expires. |
+| Make all 10,000 nonexistent keys unique | Negative caching still made 10,000 origin calls and retained 10,000 entries. | Negative caching does not protect the first request for each key; high-cardinality input turns it into memory pressure. |
+| Raise Bloom memory from 4 to 12 bits per valid key on the unique workload | Origin calls fell from 1,445 to 32 and observed false positives from 14.45% to 0.32%, at 48.8 KiB, 97.7 KiB, and 146.5 KiB. | Bloom memory controls a probability tradeoff, not a binary enabled/disabled property. |
+| Combine Bloom and negative caching on repeated misses | Origin calls fell from 100 (`bloom-8`) to 1, absorbed by 99 negative hits from one marker. | Bloom rejects definite misses; negative markers absorb the repeated false positives that remain. |
+
+The two mechanisms cover different request shapes. Negative caching wins when absence repeats, because it only pays off on the second request for the same key. Bloom wins when the valid key set is known and misses are high-cardinality, because it rejects definite absent keys before they reach any origin or per-request state.
+
+## Source And Pseudocode Walkthrough
+
+The complete model is [`benchmark/main.go`](benchmark/main.go). The two workloads differ only in how absent keys are generated:
+
+```go
+repeated.keys[i] = uint64(validKeys + i%repeatedKeys)
+unique.keys[i] = uint64(validKeys + i)
+```
+
+`repeated` cycles through 100 keys, so each absent key returns 100 times; `unique` advances every request and never repeats. Every generated key is greater than or equal to `validKeys`, so all requests are guaranteed to be absent from the validity filter.
+
+`newBloomFilter` sizes the bit array and derives the hash count from the bits-per-item setting:
+
+```go
+size := uint64(itemCount * bitsPerItem)
+words := (size + 63) / 64
+hashes := uint64(math.Round(float64(bitsPerItem) * math.Ln2))
+```
+
+`add` and `mightContain` use double hashing, `(h1 + i*h2) % size`, to probe `hashes` positions. A lookup returns `false` as soon as one probed bit is unset, which is the "definitely absent" path that the `Avoided origin` column counts.
+
+The request loop in `run` fixes the protection order:
+
+```go
+if !filter.mightContain(key) {
+	r.bloomRejected++
+	continue
+}
+r.bloomFalsePos++
+if _, ok := negative[key]; ok {
+	r.negativeHits++
+	continue
+}
+r.originCalls++
+if negative != nil {
+	negative[key] = struct{}{}
+}
+```
+
+A Bloom rejection avoids the origin entirely. Otherwise the key counts as a possible false positive and may still be absorbed by a marker created earlier. Only after both checks does the request become an origin call and, if negative caching is enabled, create a marker. This order explains the `bloom-8+negative` row: the 8-bit filter passed 100 requests, the first created the marker, and the remaining 99 became negative hits. `modeledOriginWork` is just `originCalls * originCost`; no origin is executed, so treat the work column as arithmetic, not wall-clock time.
 
 ## Why It Happens
 

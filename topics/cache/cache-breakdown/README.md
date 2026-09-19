@@ -73,14 +73,16 @@ The experiment waits for SWR's background refresh before collecting origin metri
 
 ## Experiment And Result Interpretation
 
-| Change | Observe | Interpretation |
-| --- | --- | --- |
-| Raise concurrency with `naive` while keeping origin latency fixed | Origin calls and peak origin concurrency rise toward the burst size. | Cache-aside does not coordinate simultaneous misses; the origin delay gives more requests time to join the miss window. |
-| Replace `naive` with `singleflight` | Origin calls and peak concurrency stay at one, while request latency remains close to origin latency. | Request coalescing bounds duplicate work but turns the loader into a shared dependency for all waiters. |
-| Replace blocking refresh with `swr` | Origin work stays at one and request latency falls, while stale responses reach 100% for this expiry wave. | SWR moves the tradeoff from latency and origin pressure to bounded staleness. |
-| Increase origin latency | The waiting time for `naive` and `singleflight` grows with it. | Coalescing changes the amount of work, not the duration of the one required origin load. |
+The default run is recorded in [`result/2026-09-02-darwin-arm64.md`](result/2026-09-02-darwin-arm64.md). The clearest contrast is at concurrency 1,000.
 
-Read these signals together. A strategy that makes only one origin call is not automatically acceptable if all callers wait too long, and a low-latency stale response is not automatically acceptable for data requiring read-after-write freshness.
+| Change | Observe in the local run | Interpretation |
+| --- | --- | --- |
+| Raise concurrency with `naive` while keeping origin latency fixed | At concurrency 1,000 and a 10 ms origin, `naive` made 1,000 origin calls and reached `Peak origin concurrency = 1000`; P99 was 12.059 ms. | Cache-aside does not coordinate simultaneous misses; the origin delay gives more requests time to join the miss window. |
+| Replace `naive` with `singleflight` | Origin calls and peak concurrency dropped to 1, while P99 stayed at 12.266 ms. | Request coalescing bounds duplicate work but turns the loader into a shared dependency for all waiters. |
+| Replace blocking refresh with `swr` | Origin work stayed at 1 and P99 fell to 1 us, while `Stale responses` reached 100%. | SWR moves the tradeoff from latency and origin pressure to bounded staleness. |
+| Increase origin latency from 10 ms to 100 ms at concurrency 1,000 | `naive` P99 rose to 104.452 ms and `singleflight` P99 to 102.829 ms, but their origin-call counts did not change. | Coalescing changes the amount of work, not the duration of the one required origin load. |
+
+The `Origin calls/wave` column is the primary signal, not `Requests/s`. At concurrency 1,000, `naive` generated 1,000 times the origin work of the other two strategies, `singleflight` removed that duplication but kept P99 near the full origin latency, and `swr` removed the wait only by serving the stale value to all 1,000 requests. Read these signals together: a strategy that makes only one origin call is not automatically acceptable if waiters still block, and a low-latency stale response is not automatically acceptable for data requiring read-after-write freshness.
 
 ## Source And Pseudocode Walkthrough
 

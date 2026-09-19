@@ -95,12 +95,45 @@ The busiest node determines whether the trace fits cluster capacity. Total capac
 
 ## Experiment And Result Interpretation
 
-| Change | Observe | Interpretation |
+The table below reads the default run in [`result/2026-09-03-darwin-arm64.md`](result/2026-09-03-darwin-arm64.md). Each row changes one routing condition and follows the resulting node load.
+
+| Change | Observe in the local run | Interpretation |
 | --- | --- | --- |
-| Increase nodes under uniform traffic | Busiest-node requests fall approximately with average load. | Many independent keys give hashing enough units to distribute. |
-| Increase nodes while one key owns 50% of traffic | The busiest node remains near 50% of all requests. | A logical key is still one indivisible routing unit, regardless of cluster width. |
-| Increase nodes under Zipf traffic | Absolute busiest-node load falls slowly and `Max/mean` grows. | More nodes lower the mean faster than they lower load from the hottest key. |
-| Replicate known hot keys | Maximum physical key-copy load and busiest-node load fall. | Replication turns one logical routing unit into several read-serving units. |
+| Grow a uniform trace from 1 to 16 nodes | Busiest node fell from 1,000,000 to 66,800 requests, close to the 62,500 mean; at 64 nodes it reached 18,700 with `Max/mean` only `1.20x`. | Many independent keys give hashing enough units to distribute; growth spreads them. |
+| Grow `hot-50` from 16 to 64 nodes | Busiest node fell only from 532,502 to 509,300 requests, while `Max/mean` rose from `8.52x` to `32.60x`. | The extra nodes divide the cold 500,000 requests, but the single-copy hot key still lands on one node. |
+| Grow `zipf-1.2` to 64 nodes | Busiest node held 213,438 requests against a mean of 15,625, a `13.66x` ratio, even though the hottest key received only 207,632. | A skewed but not single-key trace still concentrates work, so average load understates the busiest node. |
+| Replicate the 10 hottest keys on 16 nodes | `hot-50` busiest node fell from 532,502 to 64,661 with 16 replicas, and the `Max key replica` column fell from 500,000 to 31,823. | Replication turns one logical routing unit into several read-serving units; serialization moves to each physical copy. |
+
+Read the `Hottest logical key` and `Busiest node` columns together. When they are nearly equal, as in every unreplicated `hot-50` row, the busiest node *is* the hot key and no amount of sharding can lower it. The `Max key replica` column shows how replication lowers that indivisible floor rather than just reshuffling the rest.
+
+## Source And Pseudocode Walkthrough
+
+The complete model is [`benchmark/main.go`](benchmark/main.go). It has three stages: build a deterministic request trace, route every request to a physical replica, and aggregate per-node and per-replica counts.
+
+`makeWorkloads` fixes key popularity before routing begins:
+
+```go
+uniformKey := i % keyCount
+hotKey := 0
+if i%2 == 1 {
+	hotKey = 1 + (i/2)%(keyCount-1)
+}
+```
+
+Every even request sets `hotKey = 0`, so exactly half of the one million requests target one logical key. This is why `hot-50` reports `Hottest logical key = 500000`. The Zipf generator uses the fixed `-seed` value, which is why rerunning reproduces `207632` for `zipf-1.2`.
+
+`distribute` contains the routing decision that explains every result:
+
+```go
+primary := int(mix64(uint64(key)) % uint64(nodes))
+replica := 0
+if key < replicatedKeys && replicasPerHotKey > 1 {
+	replica = int(mix64(uint64(requestID)+0x9e3779b97f4a7c15) % uint64(replicasPerHotKey))
+}
+node := (primary + replica) % nodes
+```
+
+The first line is the indivisible-key constraint: every request for the same `key` computes the same `primary`, so changing `nodes` changes the modulus but not the fact that all requests for that key meet at one node. The conditional is the mitigation: only the first `replicatedKeys` logical keys are spread, and each of their requests selects a replica from the request ID. `max(w.keyCounts)` produces the `Hottest logical key` column, `max(nodeLoads)` produces `Busiest node`, and `max(replicaLoads)` produces `Max key replica`. `minDrainTime` then divides the busiest-node count by the assumed `node-capacity`, which is why all drain times fall when `Busiest node` falls.
 
 ## Why It Happens
 

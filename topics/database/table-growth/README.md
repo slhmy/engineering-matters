@@ -117,6 +117,54 @@ It inserts the same 100,000-row batch into empty tables with 0, 1, and 3 seconda
 
 The final one-index table added about 156 kB of index storage over the primary key alone; the three-index table added about 3.1 MB. The 1.1-million-row table reached 111 MB of heap and 12.9 MB of indexes.
 
+### Write Source And Pseudocode Walkthrough
+
+[`benchmark/sql/writes.sql`](benchmark/sql/writes.sql) builds the same schema three times and changes only the secondary indexes:
+
+```sql
+CREATE INDEX insert_one_customer_idx ON insert_one (customer_id);
+
+CREATE INDEX insert_three_customer_idx ON insert_three (customer_id);
+CREATE INDEX insert_three_created_idx ON insert_three (created_at);
+CREATE INDEX insert_three_status_idx  ON insert_three (status);
+```
+
+Each measured insert streams the same rows:
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS, WAL, TIMING OFF)
+INSERT INTO insert_three (id, customer_id, created_at, status, payload)
+SELECT g, (g * 7919) % 100000, timestamp '2020-01-01' + g * interval '1 second', 'new', repeat('x', 40)
+FROM generate_series(1, :batch::bigint) AS g;
+```
+
+There is no access path for the planner to choose, so the plan text stays identical. The executor still writes one heap tuple and one entry per index for every generated row, and `WAL: records` with `bytes` reports that work. That is why only the index count and the WAL/buffer numbers change between the three inserts.
+
+The append case keeps one index and changes only where the rows land:
+
+```sql
+-- prefill, outside the measurement
+INSERT INTO append_one (...)
+SELECT g, ... FROM generate_series(1, :rows::bigint) AS g;
+
+-- measured append
+EXPLAIN (ANALYZE, BUFFERS, WAL, TIMING OFF)
+INSERT INTO append_one (...)
+SELECT g, ... FROM generate_series(:rows::bigint + 1, :rows::bigint + :batch::bigint) AS g;
+```
+
+The batch size is unchanged, but each new key now descends a taller B-tree and may split an internal page, which appears as extra buffers and WAL.
+
+The update cases differ only in `fillfactor` and in whether the changed column is indexed:
+
+```sql
+CREATE TABLE update_fillfactor (...) WITH (fillfactor = 80);
+UPDATE update_fillfactor SET payload = repeat('y', 40) WHERE id % 10 = 0;      -- unindexed
+UPDATE update_fillfactor SET customer_id = customer_id + 1 WHERE id % 10 = 0;  -- indexed
+```
+
+`fillfactor = 80` leaves about 20% free space per page. A new tuple version that fits stays on its page, so PostgreSQL can keep the existing index entries pointing through a heap-only tuple chain and skip every secondary index. When the updated column is indexed, its value changes and a new index entry is unavoidable. `pg_stat_get_tuples_hot_updated` counts exactly those heap-only updates, which is why the same 10,000 unindexed updates wrote 1.08 MB of WAL at fillfactor 80 and 3.13 MB at fillfactor 100.
+
 ## Experiment 3: Row Width And TOAST
 
 Payload width decides whether values stay on the main heap page or move to out-of-line TOAST storage. A query that never touches the wide column pays little; a query that does pays in extra page reads.
@@ -140,6 +188,39 @@ It builds a 40-byte narrow table and a roughly 6,400-byte wide table with `STORA
 | Read `length(payload)` for 505 rows | 351 buffers and 0.236 ms versus 2,352 buffers and 19.951 ms. | Touching a toasted value forces TOAST page reads, multiplying I/O. |
 | Aggregate over every payload | 618 buffers and 4.154 ms versus 200,468 buffers and 580.848 ms. | The full storage footprint becomes I/O when the whole table is read. |
 
+### Row Width Source And Pseudocode Walkthrough
+
+[`benchmark/sql/toast.sql`](benchmark/sql/toast.sql) gives both tables identical columns and changes only the payload construction and its storage mode:
+
+```sql
+ALTER TABLE width_wide ALTER COLUMN payload SET STORAGE EXTERNAL;
+
+INSERT INTO width_narrow (id, bucket, created_at, payload)
+SELECT g, (g * 7919) % 10000, timestamp '2020-01-01' + g * interval '1 second', repeat('n', 40)
+FROM generate_series(1, :rows::bigint) AS g;
+
+INSERT INTO width_wide (id, bucket, created_at, payload)
+SELECT g, (g * 7919) % 10000, timestamp '2020-01-01' + g * interval '1 second', repeat(md5(g::text), 200)
+FROM generate_series(1, :rows::bigint) AS g;
+```
+
+`STORAGE EXTERNAL` disables compression, so the experiment measures out-of-line width rather than compressibility. A value above the roughly 2 kB TOAST threshold is stored in the TOAST relation, and the heap tuple keeps only a small pointer. The size query makes that split explicit:
+
+```sql
+pg_total_relation_size(c.oid) - pg_relation_size(c.oid) - pg_indexes_size(c.oid) AS toast_bytes
+```
+
+That subtraction is why the wide main heap is smaller than the narrow one while its `toast_bytes` is about 414 MB.
+
+The two access paths differ by which columns the query touches:
+
+```sql
+SELECT id, created_at   FROM width_wide WHERE bucket BETWEEN 500 AND 600;  -- stays on the heap
+SELECT id, length(payload) FROM width_wide WHERE bucket BETWEEN 500 AND 600;  -- must read TOAST
+```
+
+A toasted datum can be streamed without being detoasted until a function actually consumes it. That is why the experiment measures `length(payload)` rather than a bare `SELECT payload`: the plan only reflects TOAST work when the value is read, which is why this case and the full-table aggregate show the wide table's I/O.
+
 ## Experiment 4: Hot And Cold Archiving
 
 Most operational queries read recent data while most rows are old. Keeping one index over all time pays cache and maintenance cost for data that is rarely read. Partial indexes and partitioning reshape that cost.
@@ -162,6 +243,35 @@ One million rows span 2020; `created_at >= 2020-12-01` selects 82,170 rows (8.22
 | Partition the table by month | Local indexes totaled 34.6 MB, slightly more than the 31.6 MB full index. | Partitioning trades one large structure for many small ones and enables pruning, at some total-size overhead. |
 | Run the recent-activity query | Full, partial, and partitioned plans each used about 4 buffers. | With a small `LIMIT` and an ordered index, the immediate query is cheap in every layout; the difference is the structure being maintained. |
 | Run a cold six-month query | The partitioned plan appended six partitions. | Pruning removes irrelevant months, but a broad cold range still scans each matching partition. |
+
+### Archiving Source And Pseudocode Walkthrough
+
+[`benchmark/sql/archive.sql`](benchmark/sql/archive.sql) gives the same rows three layouts. The first index covers all time:
+
+```sql
+CREATE INDEX archive_full_created_idx ON archive_full (created_at, id);
+```
+
+The second stores only the hot slice:
+
+```sql
+CREATE INDEX archive_full_partial_created_idx
+    ON archive_full_partialindex (created_at, id)
+    WHERE created_at >= timestamp '2020-12-01';
+```
+
+Because the predicate is part of the index definition, PostgreSQL does not store entries for older rows, and a query whose predicate implies the same condition can still use the index. That is why `pg_relation_size('archive_full_partial_created_idx')` returns about 2.6 MB instead of 31.6 MB.
+
+The third layout partitions on the same boundary:
+
+```sql
+CREATE TABLE archive_part (...) PARTITION BY RANGE (created_at);
+CREATE TABLE archive_part_2020_12 PARTITION OF archive_part
+    FOR VALUES FROM ('2020-12-01') TO ('2021-01-01');
+CREATE INDEX archive_part_created_idx ON archive_part (created_at, id);
+```
+
+`CREATE INDEX` on the partitioned parent creates one index per partition. At plan time PostgreSQL compares the query predicate with the partition bounds and can exclude every month that cannot match, which is why the cold January-to-June query lists only six partitions in its `Parallel Append` instead of all twelve.
 
 ## Experiment 5: Concurrent Readers And Writers
 
@@ -187,6 +297,40 @@ Each case runs for 5 s after a `pg_stat_reset()`, at 1 and 8 clients.
 | Keep writes uniform across keys | Write throughput did not collapse on the larger table. | Random updates to different rows do not contend on the same row or page. |
 
 The buffer counters show the cache effect growth creates; elapsed time would diverge more on physical storage than on `tmpfs`.
+
+### Concurrency Source And Pseudocode Walkthrough
+
+[`benchmark/sql/concurrency-setup.sql`](benchmark/sql/concurrency-setup.sql) builds one table and resets statistics so each case measures only its own activity:
+
+```sql
+CREATE TABLE bench_orders (...) WITH (fillfactor = 80);
+CREATE INDEX bench_orders_customer_idx ON bench_orders (customer_id);
+VACUUM (ANALYZE) bench_orders;
+SELECT pg_stat_reset();
+```
+
+The two `pgbench` scripts keep one statement per transaction and randomize the key:
+
+```sql
+\set id random(1, :rows)
+SELECT id, customer_id, created_at, payload FROM bench_orders WHERE id = :id;
+```
+
+```sql
+\set id random(1, :rows)
+UPDATE bench_orders SET counter = counter + 1 WHERE id = :id;
+```
+
+[`benchmark/run-concurrency.sh`](benchmark/run-concurrency.sh) runs each script at 1 and 8 clients, then reads the counters that explain the result:
+
+```sh
+$PGBENCH --no-vacuum --client="$clients" --jobs="$clients" --time=5 --protocol=prepared \
+  --define=rows="$ROWS" --file "/benchmark/pgbench-$mode.sql"
+$PSQL -t -A -c "SELECT heap_blks_hit, heap_blks_read, idx_blks_hit, idx_blks_read \
+  FROM pg_statio_user_tables WHERE relname = 'bench_orders';"
+```
+
+A primary-key point lookup almost always finds its index page; the heap page may or may not be cached. At 100,000 rows the `heap_blks_read` column stays at 0, while at 1,000,000 rows it recorded 25,909 of 142,460 accesses. The TPS and latency numbers are the throughput counterpart of those counters.
 
 ## Detailed Explanation
 

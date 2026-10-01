@@ -1,0 +1,31 @@
+services:
+  pg:
+    image: ${PG_IMAGE:-postgres:17}
+    environment:
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: disposable-lab-only
+      POSTGRES_DB: lab
+    command: [postgres, -c, shared_buffers=128MB, -c, max_parallel_workers_per_gather=0, -c, jit=off]
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -h 127.0.0.1 -U lab -d lab']
+      interval: 2s
+      timeout: 5s
+      retries: 90
+  mysql:
+    image: ${MYSQL_IMAGE:-mysql:8.4}
+    environment:
+      MYSQL_ROOT_PASSWORD: disposable-lab-only
+      MYSQL_DATABASE: lab
+    command: [mysqld, --innodb-buffer-pool-size=134217728, --skip-log-bin]
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: [CMD-SHELL, 'MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysql --protocol=TCP -h127.0.0.1 -uroot --database=lab --execute="SELECT 1" --silent']
+      interval: 2s
+      timeout: 5s
+      retries: 90
+volumes:
+  pg-data:
+  mysql-data:

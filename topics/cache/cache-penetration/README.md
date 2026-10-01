@@ -91,6 +91,18 @@ The default run is recorded in [`result/2026-09-02-darwin-arm64.md`](result/2026
 
 The two mechanisms cover different request shapes. Negative caching wins when absence repeats, because it only pays off on the second request for the same key. Bloom wins when the valid key set is known and misses are high-cardinality, because it rejects definite absent keys before they reach any origin or per-request state.
 
+### Reading The Modeled Origin Work
+
+Every timing in this table is derived, not measured: `Origin calls × 5 ms`, the assumed per-lookup cost. That makes the seconds column useful for comparing strategies within the model and useless as a latency prediction. `none` shows 50s because it makes 10,000 calls; `bloom-12` shows 0s on the repeated workload because it made zero calls. Read it as a work budget, and read the call count as the primary number, since the seconds column is just that count scaled by a constant.
+
+The wait time a user experiences is a different quantity and is not in this table at all. Ten thousand origin calls against a system with, say, 100 concurrent lookup slots and 5 ms per lookup is roughly 0.5 s of aggregate work, not 50 s of user-visible latency. The model deliberately measures offered work rather than queueing, which is the right choice for choosing a protection strategy and the wrong one for predicting p99.
+
+The gap between the two Bloom configurations is where the derived column earns its place, because it shows the false-positive rate turning into real traffic. On the `unique` workload, `bloom-4` makes 1,445 calls and `bloom-8` makes 205 — 7 times fewer, straight from the false-positive rate dropping from 14.45% to 2.05%. Going from `bloom-8` to `bloom-12` cuts calls from 205 to 32, another 6.4x, for 50% more memory, 97.7 KiB to 146.5 KiB. Read the memory column against the call column and the diminishing character is clear: the first step buys more absolute protection per byte than the last, which is what a logarithmic false-positive curve looks like when the input set is fixed at 100,000 keys.
+
+Watch what happens when the key set is not fixed. Every figure here assumes 100,000 valid keys and computes bits-per-key from that. If the valid set grew to 10 million, the same configured bits-per-key would require 100 times the memory, and a filter sized for the smaller set would saturate and approach a 100% false-positive rate — at which point it would pass nearly every request through and `bloom-12` would behave like `none`. Bloom filters do not degrade gracefully with underestimation; the memory number is the load-bearing one.
+
+Finally, note what the gap between `repeated` and `unique` costs each strategy. On `repeated`, negative caching reduces 10,000 calls to 100 and holds 100 entries. On `unique` it makes all 10,000 calls and holds 10,000 entries — it did no useful work and consumed the most memory of any strategy in the table. That is the same strategy, the same code, and the same request count; only the key distribution changed. The 100x difference in entry count is the reason the two workloads are separated in this experiment rather than averaged.
+
 ## Source And Pseudocode Walkthrough
 
 The complete model is [`benchmark/main.go`](benchmark/main.go). The two workloads differ only in how absent keys are generated:

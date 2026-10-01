@@ -35,11 +35,19 @@ One local run is recorded in [`result/2026-09-01-postgresql-17-darwin-arm64.md`]
 
 ## Experiment And Result Interpretation
 
-| Change | Observe | Interpretation |
+| Change | Observe in the local run | Interpretation |
 | --- | --- | --- |
-| Move from the 100th to the 900,000th ordered row | The index-only scan consumed 100 versus 900,000 entries. | A B-tree provides order but not subtree row counts, so `OFFSET x - 1` still performs work proportional to x. |
-| Ask for the 1,000th distinct score | PostgreSQL consumed 99,901 index entries because many rows shared each score. | Distinct-value rank depends on both x and duplicate frequency; its semantics and cost differ from the x-th row. |
-| Materialize `row_number()` and index `rank` | Rank 900,000 became a one-row, 4-buffer lookup, while the materialized table and index used 71 MB. | Precomputation moves work from reads to refreshes and storage. It fits repeated rank lookups only when freshness requirements tolerate that trade. |
+| Move from the 100th to the 900,000th ordered row | The index-only scan consumed 100 versus 900,000 entries, 4 versus 3,452 buffers, and 0.015 ms versus 34.778 ms. | A B-tree provides order but not subtree row counts, so `OFFSET x - 1` still performs work proportional to x. |
+| Ask for the 1,000th distinct score | PostgreSQL consumed 99,901 index entries and 386 buffers in 4.422 ms, about the same as the 100,000th row. | Distinct-value rank depends on both x and duplicate frequency; its semantics and cost differ from the x-th row. |
+| Materialize `row_number()` and index `rank` | Rank 900,000 became a one-row, 4-buffer lookup in 0.010 ms, while the materialized table and index used 71 MB and the build itself scanned all one million entries in 309.278 ms. | Precomputation moves work from reads to refreshes and storage. It fits repeated rank lookups only when freshness requirements tolerate that trade. |
+
+The three times are worth reading as a curve, because they show what the depth of the request costs rather than what the table costs:
+
+- **Deep rank is linear in x, not logarithmic in row count.** 0.015 ms, 3.991 ms, and 34.778 ms for the 100th, 100,000th, and 900,000th row. Each step multiplies x by ten and the time by roughly ten, with buffers moving from 4 to 3,452 in step. This is the same table, the same index, and the same plan at every step, so nothing changed except how far the scan had to walk.
+- **The distinct case is not a separate curve, it is the same one with a different stop condition.** Finding the 1,000th distinct score consumed 99,901 entries and cost 4.422 ms, nearly identical to the 100,000th row at 3.991 ms despite ranking far fewer positions. Read the entry count, not x, when reasoning about cost here; with 10,000 distinct scores over one million rows there are about 100 rows per score, so 1,000 distinct values necessarily consume on the order of 100,000 entries.
+- **The precomputed lookup is the only one of the four whose time does not depend on the requested rank.** 0.010 ms and 4 buffers for rank 900,000 against 34.778 ms and 3,452 buffers to compute it. That is about a 3,500x difference, and it is bought with 71 MB of storage plus a 309.278 ms build that must be repeated whenever the ranked set changes. The comparison that matters is not "index or no index" but how many rank lookups you serve between refreshes: at roughly 310 ms per refresh, the precomputed form pays for itself once enough lookups occur that the scan total would exceed it.
+
+One caution about the 0.010 ms figure. A warm point lookup on a small hot B-tree is the most cache-favorable case in this whole topic, and it measures the read path only. The cost of maintaining exact ranks under frequent score changes sits entirely on the write side and is not in this table.
 
 The first question is semantic: decide whether ties mean `row_number()`, `rank()`, `dense_rank()`, or a distinct value. Only then does the execution-plan comparison answer the right problem.
 

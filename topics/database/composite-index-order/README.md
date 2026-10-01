@@ -45,11 +45,21 @@ For PostgreSQL, observe `Index Cond`, scan type, actual rows, shared buffers, an
 
 | Change | Observe | Interpretation |
 | --- | --- | --- |
-| Put `tenant_id` before time for a tenant feed | At one million rows, the query visited 4 buffers instead of 247. | The tenant equality selects one contiguous B-tree range, already ordered by time, so PostgreSQL can stop after 50 entries. |
-| Swap `tenant_id` and `status` while constraining both by equality | Both orders returned 10 rows with 4 buffers and no sort. | For this query, both equality values identify the same narrow prefix and the time columns remain ordered. Raw column selectivity does not make one order universally better. |
-| Remove the `status` condition | Tenant-first used an index-only scan with 8 buffers; status-first became a parallel sequential scan with 12,346 buffers. | An unconstrained leading column splits one tenant's entries across status ranges. Column order must account for queries that omit one of the equality conditions. |
+| Put `tenant_id` before time for a tenant feed | At one million rows, the query visited 4 buffers instead of 247, in 0.015 ms instead of 0.383 ms. | The tenant equality selects one contiguous B-tree range, already ordered by time, so PostgreSQL can stop after 50 entries. |
+| Swap `tenant_id` and `status` while constraining both by equality | Both orders returned 10 rows with 4 buffers and no sort, in 0.013 ms and 0.021 ms. | For this query, both equality values identify the same narrow prefix and the time columns remain ordered. Raw column selectivity does not make one order universally better. |
+| Remove the `status` condition | Tenant-first used an index-only scan with 8 buffers in 0.080 ms; status-first became a parallel sequential scan with 12,346 buffers in 10.009 ms. | An unconstrained leading column splits one tenant's entries across status ranges. Column order must account for queries that omit one of the equality conditions. |
 
 Interpret column order against the whole query portfolio. The best index for one fully constrained query can be a poor index for a related prefix query.
+
+### Reading The Timings
+
+The tenant feed is the case with a clean answer, and the timings agree with the buffers, which is not always true in these experiments. Tenant-first returns 50 rows in 0.015 ms from 4 buffers; time-first returns the same 50 rows in 0.383 ms from 247 buffers. That is roughly 25x the time for 60x the buffers, and both plans are index-only scans with no sort, so the entire difference is the walk. The tenant-first plan seeks to one tenant's range and takes the first 50 entries. The time-first plan has to scan the globally time-ordered index and test every entry for `tenant_id = 500`, stopping once it has accumulated 50 matches.
+
+An important caution about the 247-buffer figure, and the reason it should not be read as a scalability result: it is the same 247 at 100,000 rows and at 1,000,000 rows, and the time moves only from 0.362 ms to 0.383 ms. That flatness does not mean the time-first index is immune to growth. It is an artifact of the controlled distribution, where tenant IDs repeat every 1,000 rows, so a fixed `LIMIT 50` always finds its matches within the same ~49,500-entry window regardless of how large the table is behind it. The cost of this plan scales with how far you must walk to accumulate 50 matches, which is a function of tenant sparsity and of the limit — not of table size directly. A partition of one tenant per 10,000 rows, or a `LIMIT 500`, would extend the walk proportionally.
+
+The two equality cases measure a genuine tie and should be presented as one. 0.013 ms versus 0.021 ms, both from 4 buffers, is an 8 µs difference on a sub-100 µs measurement — scheduling noise, not a ranking. What the pair establishes is that when both leading columns are constrained by equality, the planner can use them as a narrow prefix in either order, so the extra time columns in the index still supply the required order for free. The lesson is negative but useful: "most selective column first" is not a rule that this query can distinguish, because both columns are fully pinned.
+
+The count query is where the portfolio argument becomes concrete, and it is the only case in the experiment with a large timing gap. Tenant-first answers with an index-only scan over one tenant's entries: 8 buffers, 0.080 ms. Status-first cannot use `tenant_id` as a prefix at all, so it falls back to a parallel sequential scan touching all 12,346 buffers in 10.009 ms — roughly 125x the time. This is the same index, the same table, and the same predicate; only the position of `tenant_id` in the composite key differs. Read that number as the cost of an index that does not cover the leading predicate of a query you actually run, and it is why the case is in the matrix at all. It also explains the 100,000-row comparison in the source data: the same scan visited 1,235 buffers there, and the plan was chosen independently at both sizes rather than crossing over.
 
 ### Engine Comparison
 
@@ -63,6 +73,21 @@ The broad principles matched, but the optimizers exposed different fallback path
 | Tenant count, status first | Parallel sequential scan of one million rows | Covering index skip scan returning 1,000 tenant entries |
 
 MySQL's skip scan repeatedly probes the index for each distinct value of the missing leading `status` column. It is attractive here because `status` has only seven values. If the missing prefix had high cardinality, repeated probes could become expensive and the optimizer could choose another plan.
+
+The MySQL timings show the same shape as PostgreSQL's, from a different mechanism:
+
+| Case at 1,000,000 rows | Rows consumed | Execution time |
+| --- | ---: | ---: |
+| Tenant feed, tenant first | 50 | 0.015 ms |
+| Tenant feed, time first | 49,501 | 4.73 ms |
+| Tenant + status, tenant first | 10 | 0.015 ms |
+| Tenant + status, status first | 10 | 0.012 ms |
+| Tenant count, tenant first | 1,000 | 0.077 ms |
+| Tenant count, status first | 1,000 (skip scan) | 0.165 ms |
+
+Tenant-first costs about 0.3 µs per returned row while the time-first feed costs about 0.096 µs per *consumed* row — the per-row cost is lower, but there are 990 times as many rows to consume, so the total is 315x higher. That is the same conclusion as the PostgreSQL buffer comparison with a different unit of measurement. Note also that the time-first feed consumed 49,501 entries at both table sizes and its time barely moved, 4.65 ms to 4.73 ms, for the same distribution reason described above.
+
+The count query is where the two engines differ in character rather than degree. PostgreSQL abandoned the index entirely for a parallel sequential scan, 10.009 ms; MySQL kept a covering skip scan for 0.165 ms. The buffer-versus-iterator comparison is not meaningful across engines, but the fact that one optimizer found an index path and the other did not is, and it is a reminder that "the index cannot be used for this predicate" is an engine-specific statement.
 
 Do not compare PostgreSQL buffer counts directly with MySQL iterator row counts, or use these timings to rank engines. Their storage structures, caches, instrumentation, and container processes differ. Compare how each plan's work changes when column order or row count changes within the same engine.
 

@@ -47,10 +47,29 @@ The selected columns remain exactly `id, created_at` in all cases. They are pres
 | --- | --- | --- |
 | No index, reduce the limit from the full tenant set to 50 | Top-N heapsort kept only 50 tuples, yet the scan still read 1,725 buffers (100,000 rows) or 17,368 buffers (1,000,000 rows). | `LIMIT` bounds retained sort state; it does not let an unordered scan know which unseen row might rank first. |
 | No index, request every qualifying row | Sort method switched from top-N heapsort to quicksort, and the million-row time rose from 13.648 ms to 24.334 ms at the same 17,368 buffers. | When N approaches the candidate count, all qualifying tuples must be retained and ordered. Memory limits can turn this into an external merge using temporary storage. |
-| Add the matching composite index with `LIMIT 50` | The sort disappeared and the index-only scan emitted exactly 50 entries from 4 or 5 buffers. | Equality on the leading tenant column creates one range whose remaining key order exactly matches the query, allowing early stop. |
-| Keep the index but use the large limit | The same plan emitted 10,000 entries from 54 buffers, or 100,000 from 496. | An index removes the explicit sort, not the cost of consuming and returning a large result. The advantage over scan-and-sort narrows as N grows. |
+| Add the matching composite index with `LIMIT 50` | The sort disappeared and the index-only scan emitted exactly 50 entries from 4 or 5 buffers, in 0.012 ms (100,000 rows) and 0.017 ms (1,000,000 rows). | Equality on the leading tenant column creates one range whose remaining key order exactly matches the query, allowing early stop. |
+| Keep the index but use the large limit | The same plan emitted 10,000 entries from 54 buffers in 0.480 ms, or 100,000 from 496 in 4.988 ms. | An index removes the explicit sort, not the cost of consuming and returning a large result. The advantage over scan-and-sort narrows as N grows. |
 
-Read the `Rows entering sort or index entries emitted` column next to `Shared buffers`: the no-index cases show constant buffer work while the sort method and retained memory change, and the indexed cases show work that grows with N. The `LIMIT` value alone does not determine which happens, so read the run primarily by plan shape, rows consumed, sort method, and buffers. Execution times are local observations on warm `tmpfs`, not portable ratios.
+Read the `Rows entering sort or index entries emitted` column next to `Shared buffers`: the no-index cases show constant buffer work while the sort method and retained memory change, and the indexed cases show work that grows with N. The `LIMIT` value alone does not determine which happens, so read the run primarily by plan shape, rows consumed, sort method, and buffers.
+
+### Reading The Timings
+
+The two limit sizes at one million rows are the sharpest comparison in the experiment, because they differ only in returned rows:
+
+| Case at 1,000,000 rows | Rows returned | Work | Time |
+| --- | ---: | --- | ---: |
+| No index, `LIMIT 50` | 50 | Full scan, top-N heapsort | 13.648 ms |
+| Matching index, `LIMIT 50` | 50 | 50 index entries | 0.017 ms |
+| No index, `LIMIT 100,000` | 100,000 | Full scan, quicksort | 24.334 ms |
+| Matching index, `LIMIT 100,000` | 100,000 | 100,000 index entries | 4.988 ms |
+
+Read the left column of that table as the dominant fact. **The no-index scan costs nearly the same for 50 rows as for 100,000.** 13.648 ms versus 24.334 ms is a 1.8x difference for a 2,000x difference in returned rows, because both plans read all 17,368 buffers. What changed is only what happened after the scan: retaining 28 kB in a top-N heap versus sorting the full candidate set in 3,064 kB, 2,010 kB, and 1,906 kB across the parallel processes. That extra ~10.7 ms is the sort itself, and it is the smaller part of a 13.648 ms floor that the scan alone already imposes.
+
+Then compare across, at `LIMIT 50`: 13.648 ms down to 0.017 ms, roughly 800x. The index did not make the scan faster; it eliminated it, along with the sort, by turning the request into a seek plus 50 sequential index entries. At `LIMIT 100,000` the same index still wins, 24.334 ms versus 4.988 ms, but the margin drops from ~800x to ~5x. The gap closed from the index side, not the scan side: the scan time barely moved between the two limits, while the indexed time grew from 0.017 ms to 4.988 ms — a factor of about 290 for a 2,000x increase in emitted rows, because those rows must still be read, assembled, and returned.
+
+That is the tradeoff worth naming. An ordered index converts "work proportional to the whole table" into "work proportional to the rows you actually return," and both plans in this matrix confirm it. It does not make a large result cheap, and the per-row indexed cost is not constant either: 50 entries take 0.017 ms (about 0.34 µs each) while 100,000 entries take 4.988 ms (about 0.05 µs each), because the fixed cost of the seek dominates the tiny result and amortizes away as N grows.
+
+Finally, note what the buffer column adds that the timing cannot. At one million rows the no-index plans report 17,368 buffers for both limits — identical work, different retained state. No single-run timing will show you that on a warm `tmpfs` database where much of the heap is cached, but the buffer count shows it directly. Use the timings to see which plan you are on; use the buffers to see why.
 
 ## Source And Pseudocode Walkthrough
 

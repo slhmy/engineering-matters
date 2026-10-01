@@ -61,26 +61,39 @@ Local observations are recorded in [`result/2026-09-02-postgresql-17-darwin-arm6
 
 ## Experiment And Result Interpretation
 
-| Rows | Match ratio | Chosen plan | Actual rows | Shared buffers |
-| ---: | ---: | --- | ---: | ---: |
-| 100,000 | 0.01% | Bitmap heap scan | 10 | 12 |
-| 100,000 | 0.1% | Bitmap heap scan | 100 | 102 |
-| 100,000 | 1% | Bitmap heap scan | 1,000 | 868 |
-| 100,000 | 10% | Bitmap heap scan | 10,000 | 2,871 |
-| 100,000 | 50% | Sequential scan | 50,000 | 2,858 |
-| 100,000 | 90% | Sequential scan | 90,000 | 2,858 |
-| 1,000,000 | 0.01% | Bitmap heap scan | 100 | 103 |
-| 1,000,000 | 0.1% | Bitmap heap scan | 1,000 | 1,003 |
-| 1,000,000 | 1% | Bitmap heap scan | 10,000 | 8,641 |
-| 1,000,000 | 10% | Bitmap heap scan | 100,000 | 28,658 |
-| 1,000,000 | 50% | Bitmap heap scan | 500,000 | 28,991 |
-| 1,000,000 | 90% | Sequential scan | 900,000 | 28,572 |
+| Rows | Match ratio | Chosen plan | Actual rows | Heap / index blocks | Shared buffers | Execution time |
+| ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| 100,000 | 0.01% | Bitmap heap scan | 10 | 10 / 2 | 12 | 0.017 ms |
+| 100,000 | 0.1% | Bitmap heap scan | 100 | 100 / 2 | 102 | 0.042 ms |
+| 100,000 | 1% | Bitmap heap scan | 1,000 | 865 / 3 | 868 | 0.534 ms |
+| 100,000 | 10% | Bitmap heap scan | 10,000 | 2,858 / 13 | 2,871 | 2.597 ms |
+| 100,000 | 50% | Sequential scan | 50,000 | 2,858 / 0 | 2,858 | 5.462 ms |
+| 100,000 | 90% | Sequential scan | 90,000 | 2,858 / 0 | 2,858 | 6.325 ms |
+| 1,000,000 | 0.01% | Bitmap heap scan | 100 | 100 / 3 | 103 | 0.046 ms |
+| 1,000,000 | 0.1% | Bitmap heap scan | 1,000 | 1,000 / 3 | 1,003 | 0.544 ms |
+| 1,000,000 | 1% | Bitmap heap scan | 10,000 | 8,630 / 11 | 8,641 | 12.042 ms |
+| 1,000,000 | 10% | Bitmap heap scan | 100,000 | 28,572 / 86 | 28,658 | 55.873 ms |
+| 1,000,000 | 50% | Bitmap heap scan | 500,000 | 28,572 / 419 | 28,991 | 121.708 ms |
+| 1,000,000 | 90% | Sequential scan | 900,000 | 28,572 / 0 | 28,572 | 81.580 ms |
 
 At low ratios, the bitmap index scan identifies relatively few tuple locations. The bitmap heap scan groups those locations by heap page, avoiding one random heap operation per tuple. At 0.01% in the million-row table, the plan needed 3 index buffers and 100 heap buffers rather than scanning 28,572 heap blocks.
 
 As the match ratio rises, qualifying tuples occupy nearly every heap block. At 10% in both scales, the bitmap heap scan already visited every heap page, plus index pages. The index still helped PostgreSQL avoid testing every row, but it no longer avoided reading the heap.
 
-At sufficiently high ratios PostgreSQL chose a sequential scan even though `events_match_bucket_idx` remained present and valid. The 100,000-row run crossed over at 50%; the million-row run crossed over at 90%. This is a planner cost choice, not index invalidation. The 50% million-row bitmap path illustrates the pressure: it read all 28,572 heap blocks plus 419 index blocks and took 121.708 ms locally, while the subsequent 90% sequential scan took 81.580 ms. Those timings are observations from one run, not a direct forced-plan comparison or a universal ratio.
+At sufficiently high ratios PostgreSQL chose a sequential scan even though `events_match_bucket_idx` remained present and valid. The 100,000-row run crossed over at 50%; the million-row run crossed over at 90%. This is a planner cost choice, not index invalidation.
+
+### Reading The Timings
+
+The cheapest way to misread this table is to divide time by rows and compare the two scales. At 0.1%, 100,000 rows take 0.042 ms and 1,000,000 rows take 0.544 ms. Ten times the rows, thirteen times the time — but the matched row count also grew tenfold, from 100 to 1,000, and the extra time is where the real story is. At the smaller scale, 100 matching rows landed in 100 heap blocks with the whole 22 MB heap resident in shared buffers, so the scan was effectively a memory walk. At the larger scale, 1,000 matching rows occupy 1,000 scattered blocks out of 28,572 in a 223 MB heap, and the plan had to touch them individually. The per-row cost rose from roughly 0.42 µs to 0.54 µs, which is small, but the buffer count rose from 102 to 1,003 — exactly tenfold, in step with matches. Buffer count tracks the access pattern; the timing tracks it plus cache state.
+
+That is why the timing column should be read as two separate regimes rather than one curve:
+
+- **Below the crossover, time tracks matched rows and their heap pages.** From 0.01% to 10% at 100,000 rows, time rises 0.017 → 0.042 → 0.534 → 2.597 ms while heap blocks rise 10 → 100 → 865 → 2,858. The two move together because almost every additional matching tuple lands on an additional heap page in this scattered layout. At the 10% case the bitmap already visits all 2,858 heap blocks — the same set the sequential scan reads — while still carrying 13 index blocks on top.
+- **Above the crossover, time tracks pages read, not rows returned.** The 100,000-row sequential scans take 5.462 ms and 6.325 ms for 50,000 and 90,000 rows over an identical 2,858 buffers. Eighty percent more rows cost sixteen percent more time, because the heap pass was already the dominant term and the filter is cheap per tuple. This is the clearest evidence in the experiment for why "more matching rows" does not by itself make the indexed path competitive.
+
+The million-row 50% case is worth pausing on, because it is where the plan and the cost model visibly disagree. PostgreSQL kept the bitmap path with an estimated cost of 40,377.43 against the sequential scan's 41,072.00 — a margin under 2%. That bitmap plan then read all 28,572 heap blocks plus 419 index blocks, 28,991 buffers total, in 121.708 ms. The 90% sequential scan read strictly fewer blocks, 28,572, in 81.580 ms while returning 400,000 more rows. The index contributed no heap savings at that point; every heap page was in the bitmap either way, so its blocks were additive work, and the planner's narrow estimate did not capture that.
+
+Treat those two times cautiously. They come from different predicates in one run, not from the same query forced down both paths, and the million-row plans mix shared hits, reads, and writes as the 223 MB heap exceeds available cache. The defensible reading is the buffer counts, which are unambiguous: once a bitmap covers every heap block, the B-tree is no longer buying reduced heap access and is only adding to it. The timing difference is consistent with that and is the reason the next step up the ratio flips to a sequential scan.
 
 Different crossover points at the two sizes are expected. PostgreSQL compares estimated costs, including heap pages, index pages, tuple processing, and access patterns. B-tree deduplication, relation size, cache pressure, and cost-model boundaries need not scale linearly. Read the plan and work performed instead of memorizing 50% or 90%.
 

@@ -104,6 +104,20 @@ The runner waits until both first updates are complete before sending either sec
 
 The wait duration is deliberately produced, not a performance benchmark. The transferable observations are blocked versus runnable state, selected job IDs, SQLSTATEs, and committed values. Docker scheduling can change the displayed milliseconds and PostgreSQL can choose either deadlock victim.
 
+### Why Only One Of The Two Times Is Informative
+
+Two durations appear in the recorded run, and they need to be read differently because they are produced by different mechanisms.
+
+The **1,256 ms same-row wait is mostly construction.** The runner deliberately holds the account-1 transaction for one second before committing, and the measured figure is the waiter's total elapsed time from issuing the update to completing it. That total includes the intentional 1,000 ms hold, the polling loop that watches `pg_stat_activity` until `wait_event_type = 'Lock'` is observed, container exec overhead, and scheduler timing. Breaking it down, content is roughly 1,000 ms of deliberate hold plus about 256 ms of harness. Do not subtract those numbers and present the remainder as a lock cost — the decomposition is approximate and the harness component varies between runs. The useful finding is a state transition, not a duration: the waiter was observed in `wait_event_type = 'Lock'` and it completed only after the holder committed. A blocking row lock is a wait on another transaction's end, so its duration is whatever that transaction chooses to take, up to the point where `lock_timeout` or `deadlock_timeout` intervenes. There is no meaningful "lock acquisition cost" to measure here, and a faster or slower figure would carry no more information.
+
+The **0.386 ms `NOWAIT` failure is the genuinely informative number**, and it is informative precisely because it is small. The probe did not wait. It attempted the lock, found it unavailable, and returned `55P03` — and 0.386 ms is consistent with a statement execution that performs no blocking at all, in the same range as an ordinary small query in this container. That is the observable difference between the two behaviors: a waiting lock produces a duration that belongs to the holder's transaction, while `NOWAIT` produces a duration that belongs to the probe's own execution. Compare the two figures and the 3,250x gap is the design difference, not a performance difference.
+
+What would make these timings into a latency measurement is a baseline this run does not contain. There is no measurement of the same `UPDATE` on an uncontended row, and the result file records no repeat distribution — one figure per scenario from one run. So the ratio between the blocked and `NOWAIT` paths cannot be quantified here; only the qualitative distinction can. If you wanted that quantification, the experiment to add would be a fixed-set matrix of `lock_timeout` values plus an uncontended control, run enough times to report a distribution rather than a single sample.
+
+The deadlock case has no timing at all, and that is the correct choice. This topic deliberately avoids timing deadlocks: once PostgreSQL aborts the victim, how long detection took depends on `deadlock_timeout`, and the recovery cost that matters is the wasted work and the retry the application must perform, neither of which is a container measurement. Read the deadlock row for its SQLSTATE and its survivor, not for speed.
+
+One general caution specific to this topic: because every measured statement runs through `psql` inside Docker with named-pipe orchestration, process startup, pipe reading, and container scheduling all sit inside wall-clock measurements at the millisecond scale. Sub-millisecond differences between scenarios should not be read as database behavior.
+
 ## Source And Pseudocode Walkthrough
 
 [`benchmark/run.sh`](benchmark/run.sh) starts the healthy Compose service, initializes tables with [`benchmark/sql/setup.sql`](benchmark/sql/setup.sql), and runs each session from a focused SQL file. Named pipes keep transactions open without embedding sleeps in the database sessions.

@@ -84,6 +84,25 @@ The default run is recorded in [`result/2026-09-02-darwin-arm64.md`](result/2026
 
 The `Origin calls/wave` column is the primary signal, not `Requests/s`. At concurrency 1,000, `naive` generated 1,000 times the origin work of the other two strategies, `singleflight` removed that duplication but kept P99 near the full origin latency, and `swr` removed the wait only by serving the stale value to all 1,000 requests. Read these signals together: a strategy that makes only one origin call is not automatically acceptable if waiters still block, and a low-latency stale response is not automatically acceptable for data requiring read-after-write freshness.
 
+### Reading The Latencies
+
+The three strategies produce three different latency floors, and each one is explained by a different constraint. Holding the 10 ms origin latency fixed:
+
+| Concurrency | `naive` P99 | `singleflight` P99 | `swr` P99 | Origin calls |
+| ---: | ---: | ---: | ---: | --- |
+| 1 | 12.156 ms | 12.159 ms | 11 µs | 1 / 1 / 1 |
+| 10 | 12.114 ms | 11.987 ms | 6 µs | 10 / 1 / 1 |
+| 100 | 12.203 ms | 12.136 ms | 917 ns | 100 / 1 / 1 |
+| 1,000 | 12.059 ms | 12.266 ms | 1 µs | 1,000 / 1 / 1 |
+
+**`naive` and `singleflight` sit at the same latency floor, and it is the origin's.** Every value in those two columns is between 11.9 and 12.3 ms regardless of concurrency, because both strategies make the caller wait for a real origin load, and the origin takes 10 ms. The residual ~2 ms above the configured latency is `time.Sleep` overshoot on this host, not a property of either strategy.
+
+That identical floor is the finding. `singleflight` cut origin work by a factor of 1,000 at concurrency 1,000 — from 1,000 calls to 1 — and changed P99 by 0.2 ms, inside the spread of the other rows. Duplicate work was not the thing delaying callers. Each caller was waiting on its own required load, and coalescing only decided how many copies of that work the origin performed. A strategy that protects the origin does not thereby make requests faster.
+
+**`swr` sits at a completely different floor, and it is not the origin's at all.** 11 µs at concurrency 1, 1 µs at 1,000 — three to four orders of magnitude below the other two, scaling the wrong way with concurrency and improving as more requests arrive. That is the signature of a path that never touches the origin: the measured request reads the existing stale value. The number is an in-memory map read plus goroutine scheduling, not a service response time, and it should not be compared to the other columns as if all three measured the same thing. What it does establish is where the latency goes. Removing the origin call from the request path removes essentially all of the latency, which confirms that the origin call was the entire cost in the other two strategies.
+
+**The 100 ms origin case isolates the residual the floor hides.** At concurrency 1,000, `naive` P99 is 104.452 ms and `singleflight` is 102.829 ms — a 1.6 ms gap that the 10 ms rows are too noisy to show. With a slower origin there is more time between the first and last duplicate load, so the extra concurrent work in the `naive` case becomes visible as slightly worse tail latency. The gap is real but small, and it is the only place in the table where the strategies' latency differs at all. Treat it as evidence about scheduling contention, not as the reason to choose coalescing; the reason is the 1,000 versus 1 origin calls, which matters for the origin's capacity and not for these callers' latency.
+
 ## Source And Pseudocode Walkthrough
 
 The complete implementation is [`benchmark/main.go`](benchmark/main.go). Its central branch is equivalent to:

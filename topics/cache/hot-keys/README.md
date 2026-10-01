@@ -106,6 +106,20 @@ The table below reads the default run in [`result/2026-09-03-darwin-arm64.md`](r
 
 Read the `Hottest logical key` and `Busiest node` columns together. When they are nearly equal, as in every unreplicated `hot-50` row, the busiest node *is* the hot key and no amount of sharding can lower it. The `Max key replica` column shows how replication lowers that indivisible floor rather than just reshuffling the rest.
 
+### Reading The Drain Times
+
+The seconds column is derived, not measured: request count divided by an assumed 100,000 requests per second per node. It is useful because it converts a share into a time, and it makes the two ways a cluster can be imbalanced distinguishable. `Max/mean` alone does not do that — a 2x ratio on a lightly loaded cluster and a 2x ratio on a saturated one are different problems, and the drain time shows which one you have.
+
+For `uniform` traffic, node count works exactly as expected: 10 s, 2.573 s, 668 ms, 187 ms as the cluster grows from 1 to 4 to 16 to 64 nodes. Each quadrupling of nodes divides the busiest node's drain time by roughly four. That is near-ideal scaling, and it is what makes the other two workloads legible by contrast.
+
+The `hot-50` unreplicated row is the ceiling on what sharding can do. From 16 nodes to 64 — a 4x increase in capacity — busiest-node count falls from 532,502 to 509,300 and drain time from 5.325 s to 5.093 s. Four times the hardware, 4% less time. The reason is arithmetic rather than algorithmic: 500,000 requests land on one node no matter how many nodes exist, and at 100,000 requests/s that node alone needs 5 s. Every extra node divides only the cold half of the traffic. `Max/mean` climbing from 8.52x to 32.60x is the same fact seen from the other side — the mean drops as nodes are added while the maximum does not, so the ratio explodes even as the absolute problem grows slightly smaller.
+
+Replication is the only lever in this table that moves that floor, and it moves it proportionally. With 16 replicas, `hot-50`'s busiest node falls to 64,661 requests and drain time to 647 ms — the 500,000 requests split sixteen ways, 31,823 per copy, which puts each replica near the mean and drops `Max/mean` to `1.03x`. Zipf gets the same treatment at smaller scale: 16 replicas bring its busiest node from 267,625 to 89,465 requests and its drain time from 2.676 s to 895 ms, with `Max/mean` falling from 4.28x to 1.43x.
+
+Read the replication rows as a bound rather than a fix, because that is what the model supports. A 16x replication of the hot key buys roughly a 8x reduction in busiest-node drain time here, not 16x, because the replicated key is no longer the only load — the remaining cold traffic and the next-hot keys still distribute unevenly across the same nodes. Diminishing returns are built in from the start: replicating the 10th hottest key buys much less than replicating the 1st, and this table does not separate those contributions. The honest summary is that replication cost scales with the number of replicas while benefit scales with how much of the total traffic the replicated keys carry, so it pays most when a small key set dominates.
+
+Two cautions about the absolute numbers. Drain time assumes 100,000 requests/s per node holds steady regardless of the load placed on it, which is the assumption that makes the model tractable and the one most likely to be wrong under a real hotspot. And the hottest key's drain time is a lower bound on user-visible latency only if the node has spare capacity; at exactly 100,000 requests/s it is saturated, and queues would add to every number in the column.
+
 ## Source And Pseudocode Walkthrough
 
 The complete model is [`benchmark/main.go`](benchmark/main.go). It has three stages: build a deterministic request trace, route every request to a physical replica, and aggregate per-node and per-replica counts.

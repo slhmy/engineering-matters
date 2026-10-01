@@ -77,6 +77,16 @@ In the `READ COMMITTED` doctor case, both decisions are valid against their own 
 
 The identity of the transaction aborted by SSI is intentionally unspecified. Applications using `SERIALIZABLE` must retry the complete transaction after `40001`, including all reads that informed its decision.
 
+### Why There Are No Timings Here
+
+Every other topic in this repository reports execution times, buffer counts, or throughput. This one deliberately reports none, and the reason is worth stating because it changes what the experiment can be used for.
+
+The four cases measure visibility and commit outcomes: what a transaction observed, whether it committed, and what the database contained afterward. Those are discrete facts, and they are reproduced identically across all three runs of the recorded result, including the two that chose a different serialization victim. A timing column would be actively misleading alongside them, because the interesting variation in this lab is scheduling, and a single wall-clock measurement of a two-session dance through `psql` and advisory-lock barriers would mostly measure the harness. The result file says this in its own terms: the noted 10 ms barrier polling and 50 ms rendezvous hold are orchestration, not database behavior.
+
+The measurement this topic actually invites is a different one, and it is absent from the recorded run: the **serialization failure rate** under genuine contention. That is the number that decides whether `SERIALIZABLE` is practical for a given workload, and it is not derivable from four deterministic sessions. It depends on how often conflicting transactions overlap, how long each holds its snapshot, and how long the retry loop takes to succeed. A manual-barrier lab like this one guarantees the conflict will occur; production makes it probabilistic. The right experiment would run many concurrent write-skew transactions with no barrier and count `40001` outcomes and retries per successful commit.
+
+Until that experiment exists, read this topic for the correctness argument and treat any performance claim about isolation levels as unsupported by these results. The cost of `SERIALIZABLE` is real — it is paid in aborted transactions and retried work — but this run does not measure it, and the three passing runs should not be cited as evidence that serialization overhead is small.
+
 ## Source And Pseudocode Walkthrough
 
 [`benchmark/run.sh`](benchmark/run.sh) launches two independent `psql` clients for each case and captures their statuses separately. It checks exact account observations, requires both `READ COMMITTED` skew transactions to commit, and requires exactly one serializable transaction to fail specifically with SQLSTATE `40001`. Any timeout, connection error, SQL error, wrong number of failures, or unexpected final state fails the run.

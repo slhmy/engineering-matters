@@ -40,8 +40,16 @@ One local run is recorded in [`result/2026-09-01-postgresql-17-darwin-arm64.md`]
 | Change | Observe | Interpretation |
 | --- | --- | --- |
 | Replace sequential `bigint` with an ordered synthetic UUID | At one million rows, the table grew from 120 MB to 128 MB and the primary-key index from 21 MB to 30 MB. | Even with the same insertion locality, a 16-byte UUID makes table tuples and B-tree entries wider than an 8-byte `bigint`. |
-| Randomize UUID insertion order | The UUID primary-key index grew from 30 MB to 38 MB and generated more WAL in this run. | Inserts spread across B-tree leaves instead of concentrating on the right edge, increasing page maintenance and reducing packing efficiency. |
+| Randomize UUID insertion order | The UUID primary-key index grew from 30 MB to 38 MB and generated more WAL in this run: 210 MB, 227 MB, and 241 MB for the three inserts. | Inserts spread across B-tree leaves instead of concentrating on the right edge, increasing page maintenance and reducing packing efficiency. |
 | Perform a warm point lookup | All three primary keys visited about 4 buffers. | Hot point-query latency can look similar while indexes have comparable height; it does not reveal storage, WAL, or sustained-write costs. |
+
+Because the three inserts share a row width and a batch size, the differences above can be read as per-row costs. Dividing by one million rows gives about 0.63 µs, 0.75 µs, and 0.68 µs per row, and about 210 B, 227 B, and 241 B of WAL per row.
+
+That WAL column is the cleanest signal in the experiment, and it separates the two pressures the introduction names. Doubling key width from 8 to 16 bytes added about 17 B of WAL per row, roughly the extra key bytes written twice — once in the heap tuple and once in the index entry. Losing insertion locality added about a further 14 B per row on top of that. Neither change altered the SQL or the number of rows, so both differences are attributable to the key representation, which is what the control was built to isolate.
+
+The two effects are not the same size, and they will not scale the same way. The width penalty is a constant per row: it appears at any table size, whether the index fits in memory or not. The locality penalty is a function of the tree's state — how densely the existing leaves are packed and how many splits the random arrivals cause — so it can grow as the index stops fitting in cache and the write stream continues. This run measures one bulk insert into empty tables, which is the most favorable possible case for random UUIDs; the 38 MB figure is a floor, not a ceiling.
+
+Do not read the sizes as a ratio to apply elsewhere. The 120 MB table is dominated by an 80-byte payload, so a wider key moves total size by only a few percent while moving the index that stores the key by about 80% from `bigint` to random UUID. The index is where a key-format decision actually lands.
 
 Use relation size and WAL as the primary signals in this experiment. One fixed-order bulk insert time is too sensitive to cache and checkpoint timing to rank identifier strategies.
 

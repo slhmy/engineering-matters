@@ -97,6 +97,18 @@ The default run is recorded in [`result/2026-09-02-darwin-arm64.md`](result/2026
 
 Every row makes exactly 1,000 origin calls. Read the `Origin calls` column first: if it is unchanged, the schedule only moved work in time, it did not remove any. Then read `Max attempts/bucket` with `Peak queued` for the same case to see offered load versus actual queuing.
 
+### Reading The Queue Wait Times
+
+The unlimited-origin rows have `Peak queued = 0` and `P99 queue wait = 0s` throughout, so they carry no latency information: with unlimited capacity, offered load passes straight through and the interesting column is `Peak active`, which is concurrency, not delay. The latency signal is entirely in the capacity-50 rows, and it has a clean arithmetic explanation.
+
+Aligned expiry offers 1,000 loads at once to an origin that can hold 50 at a time with each taking 20 ms. That is 20 batches of 50, or roughly 400 ms of serialized work. The measured P99 queue wait of 391.43 ms is that number. A loader that enters the queue last waits for the 19 batches ahead of it to drain, and 19 × 20 ms = 380 ms, so the resident queue drains almost exactly as fast as the work allows. Nothing here is a scheduling artifact; this is the fixed cost of a fixed-latency origin meeting a burst.
+
+Jitter and staggering attack that number by reducing how many batches there are, not how long each takes. Jitter brings `Peak queued` from 950 to 17 and P99 wait from 391.43 ms to 4.441 ms — roughly an 88x reduction. Staggering brings the queue to 13 and P99 to 1.87 ms, another 2.4x below jitter. The mechanism is visible in `Max attempts/bucket`: 1,000 → 31 → 23.7. Each 10 ms window can only absorb so many arrivals, and 50 in-flight 20 ms loads means a steady-state capacity of roughly 25 new loads per 10 ms tick. Jitter's busiest bucket of 31 slightly exceeds that, which is exactly why a residual queue of 17 forms; stagger's 23.7 stays under it, which is why only 13 remain and they drain almost immediately.
+
+That relationship — queue forms when a bucket's arrivals exceed the in-flight capacity divided by tick length — is the thing worth taking away, and it is why the two smooth schedules are not interchangeable in kind. Jitter is a probabilistic fix: it made the busiest bucket 31 where the aligned case had 1,000, but a different seed could produce a bucket above 25 and a queue. Staggering is a deterministic fix, and its 23.7 reflects the even spacing rather than a lucky draw. The cost is on the other side of the trade: jitter needs only a random offset at write time, while staggering needs a central schedule or an ownership convention that a fleet of writers has to respect.
+
+One caution about all three P99 numbers. They are queue wait only, an average over three runs, and they exclude the 20 ms load itself — a loader at P99 waits 391 ms and then still waits its own 20 ms for the origin. The end-to-end number a user would see is larger, and it would be larger still in a system whose latency degrades under load, which this model deliberately does not do.
+
 ## Source And Pseudocode Walkthrough
 
 The complete model is [`benchmark/main.go`](benchmark/main.go). The schedule is decided before any request runs:

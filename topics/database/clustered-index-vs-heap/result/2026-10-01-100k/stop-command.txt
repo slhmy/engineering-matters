@@ -1,0 +1,1 @@
+docker compose -p index-layout-21abb89a734e -f /Users/slhmy/Workspace/engineering-matters/topics/database/clustered-index-vs-heap/benchmark/compose.yaml down

@@ -1,0 +1,10 @@
+{
+  "versions": {
+    "pg": "PostgreSQL 17.11 (Debian 17.11-1.pgdg13+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit\n",
+    "mysql": "8.4.11\n"
+  },
+  "image_ids": {
+    "pg": "sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f",
+    "mysql": "sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242"
+  }
+}

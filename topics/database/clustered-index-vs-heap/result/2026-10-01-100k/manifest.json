@@ -1,0 +1,24 @@
+{
+  "rows": 100000,
+  "range_rows": 1000,
+  "payload_bytes": 256,
+  "shuffle": "ascending SHA256(layout-2026:<decimal id>)",
+  "full_table": {
+    "rows": 100000,
+    "sha256": "e20687994624fb8649fc1f70a3f6a3e88dcdb296625fab92ace28b3dcf58fc05"
+  },
+  "cases": {
+    "pk_range_payload": {
+      "rows": 1000,
+      "sha256": "ba37ef6bcf9804310e66ef30178ef0cf47495b6a3f70c56bbee7aee56bde8ded"
+    },
+    "secondary_payload": {
+      "rows": 100,
+      "sha256": "85da027b0a78b8a090312ec6f28fa089f1803100bd3b96b4a4f5d0574c7e9b58"
+    },
+    "secondary_covering": {
+      "rows": 100,
+      "sha256": "51535da8570d0170de2a547a1a8dc056f26c7ec490d3cdac44eb3c2476dbe6c7"
+    }
+  }
+}

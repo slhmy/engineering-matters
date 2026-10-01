@@ -52,7 +52,7 @@ Each topic should generally cover:
 
 - [Go sync map](topics/go/sync-map/): Compare several concurrent map strategies under different read/write ratios, key distributions, and hot-key access patterns.
 - [Database table growth](topics/database/table-growth/): Understand why queries, indexes, pagination, and maintenance work become more complex as relational database tables grow.
-- [Clustered index versus heap](topics/database/clustered-index-vs-heap/): Compare PostgreSQL and InnoDB primary-range, secondary, and covering reads after sequential and shuffled insertion; results pending.
+- [Clustered index versus heap](topics/database/clustered-index-vs-heap/): Compare PostgreSQL and InnoDB primary-range, secondary, and covering reads after sequential and shuffled insertion; 100k-row results and raw plans recorded.
 - [Index selectivity](topics/database/index-selectivity/): Observe why an existing index can lose to a sequential scan as more rows match.
 - [Point lookup versus range scan](topics/database/point-vs-range-scan/): Separate the cost of finding a range boundary from reading and returning the range.
 - [Sorting and LIMIT](topics/database/sorting-and-limit/): Compare top-N sorting, full sorting, and early stop through an order-compatible index.

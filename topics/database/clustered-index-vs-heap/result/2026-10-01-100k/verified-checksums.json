@@ -1,0 +1,66 @@
+{
+  "pg/rows_seq/full_table": {
+    "rows": 100000,
+    "sha256": "e20687994624fb8649fc1f70a3f6a3e88dcdb296625fab92ace28b3dcf58fc05"
+  },
+  "pg/rows_shuffled/full_table": {
+    "rows": 100000,
+    "sha256": "e20687994624fb8649fc1f70a3f6a3e88dcdb296625fab92ace28b3dcf58fc05"
+  },
+  "pg/rows_seq/pk_range_payload": {
+    "rows": 1000,
+    "sha256": "ba37ef6bcf9804310e66ef30178ef0cf47495b6a3f70c56bbee7aee56bde8ded"
+  },
+  "pg/rows_seq/secondary_payload": {
+    "rows": 100,
+    "sha256": "85da027b0a78b8a090312ec6f28fa089f1803100bd3b96b4a4f5d0574c7e9b58"
+  },
+  "pg/rows_seq/secondary_covering": {
+    "rows": 100,
+    "sha256": "51535da8570d0170de2a547a1a8dc056f26c7ec490d3cdac44eb3c2476dbe6c7"
+  },
+  "pg/rows_shuffled/pk_range_payload": {
+    "rows": 1000,
+    "sha256": "ba37ef6bcf9804310e66ef30178ef0cf47495b6a3f70c56bbee7aee56bde8ded"
+  },
+  "pg/rows_shuffled/secondary_payload": {
+    "rows": 100,
+    "sha256": "85da027b0a78b8a090312ec6f28fa089f1803100bd3b96b4a4f5d0574c7e9b58"
+  },
+  "pg/rows_shuffled/secondary_covering": {
+    "rows": 100,
+    "sha256": "51535da8570d0170de2a547a1a8dc056f26c7ec490d3cdac44eb3c2476dbe6c7"
+  },
+  "mysql/rows_seq/full_table": {
+    "rows": 100000,
+    "sha256": "e20687994624fb8649fc1f70a3f6a3e88dcdb296625fab92ace28b3dcf58fc05"
+  },
+  "mysql/rows_shuffled/full_table": {
+    "rows": 100000,
+    "sha256": "e20687994624fb8649fc1f70a3f6a3e88dcdb296625fab92ace28b3dcf58fc05"
+  },
+  "mysql/rows_seq/pk_range_payload": {
+    "rows": 1000,
+    "sha256": "ba37ef6bcf9804310e66ef30178ef0cf47495b6a3f70c56bbee7aee56bde8ded"
+  },
+  "mysql/rows_seq/secondary_payload": {
+    "rows": 100,
+    "sha256": "85da027b0a78b8a090312ec6f28fa089f1803100bd3b96b4a4f5d0574c7e9b58"
+  },
+  "mysql/rows_seq/secondary_covering": {
+    "rows": 100,
+    "sha256": "51535da8570d0170de2a547a1a8dc056f26c7ec490d3cdac44eb3c2476dbe6c7"
+  },
+  "mysql/rows_shuffled/pk_range_payload": {
+    "rows": 1000,
+    "sha256": "ba37ef6bcf9804310e66ef30178ef0cf47495b6a3f70c56bbee7aee56bde8ded"
+  },
+  "mysql/rows_shuffled/secondary_payload": {
+    "rows": 100,
+    "sha256": "85da027b0a78b8a090312ec6f28fa089f1803100bd3b96b4a4f5d0574c7e9b58"
+  },
+  "mysql/rows_shuffled/secondary_covering": {
+    "rows": 100,
+    "sha256": "51535da8570d0170de2a547a1a8dc056f26c7ec490d3cdac44eb3c2476dbe6c7"
+  }
+}

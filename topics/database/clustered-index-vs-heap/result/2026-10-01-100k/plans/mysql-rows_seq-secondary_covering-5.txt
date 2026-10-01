@@ -1,0 +1,2 @@
+-> Covering index lookup on rows_seq using rows_seq_bucket_id (bucket=42)  (cost=10.3 rows=100) (actual time=0.00888..0.0134 rows=100 loops=1)
+

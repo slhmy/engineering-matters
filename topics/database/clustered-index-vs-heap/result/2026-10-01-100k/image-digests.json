@@ -1,0 +1,24 @@
+{
+  "pg": {
+    "Id": "sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f",
+    "RepoTags": [
+      "public.ecr.aws/docker/library/postgres:17"
+    ],
+    "RepoDigests": [
+      "public.ecr.aws/docker/library/postgres@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f"
+    ],
+    "Os": "linux",
+    "Architecture": "arm64"
+  },
+  "mysql": {
+    "Id": "sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242",
+    "RepoTags": [
+      "public.ecr.aws/docker/library/mysql:8.4"
+    ],
+    "RepoDigests": [
+      "public.ecr.aws/docker/library/mysql@sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242"
+    ],
+    "Os": "linux",
+    "Architecture": "arm64"
+  }
+}

@@ -1,0 +1,7 @@
+block_size	8192	
+effective_cache_size	524288	8kB
+jit	off	
+max_parallel_workers_per_gather	0	
+random_page_cost	4	
+seq_page_cost	1	
+shared_buffers	16384	8kB

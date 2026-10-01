@@ -1,0 +1,2 @@
+DATABASE RUN COMPLETED; checksums, root loops and PostgreSQL plan row counts verified.
+Read README caveats before comparing timings.

@@ -1,0 +1,50 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Index Only Scan",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Scan Direction": "Forward",
+      "Index Name": "rows_shuffled_bucket_id",
+      "Relation Name": "rows_shuffled",
+      "Alias": "rows_shuffled",
+      "Startup Cost": 0.42,
+      "Total Cost": 6.17,
+      "Plan Rows": 100,
+      "Plan Width": 12,
+      "Actual Startup Time": 0.022,
+      "Actual Total Time": 0.026,
+      "Actual Rows": 100,
+      "Actual Loops": 1,
+      "Index Cond": "(bucket = 42)",
+      "Rows Removed by Index Recheck": 0,
+      "Heap Fetches": 0,
+      "Shared Hit Blocks": 4,
+      "Shared Read Blocks": 0,
+      "Shared Dirtied Blocks": 0,
+      "Shared Written Blocks": 0,
+      "Local Hit Blocks": 0,
+      "Local Read Blocks": 0,
+      "Local Dirtied Blocks": 0,
+      "Local Written Blocks": 0,
+      "Temp Read Blocks": 0,
+      "Temp Written Blocks": 0
+    },
+    "Planning": {
+      "Shared Hit Blocks": 87,
+      "Shared Read Blocks": 0,
+      "Shared Dirtied Blocks": 0,
+      "Shared Written Blocks": 0,
+      "Local Hit Blocks": 0,
+      "Local Read Blocks": 0,
+      "Local Dirtied Blocks": 0,
+      "Local Written Blocks": 0,
+      "Temp Read Blocks": 0,
+      "Temp Written Blocks": 0
+    },
+    "Planning Time": 0.126,
+    "Triggers": [
+    ],
+    "Execution Time": 0.045
+  }
+]

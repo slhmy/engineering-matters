@@ -1,6 +1,6 @@
 # Clustered primary-key rows versus a separate heap
 
-Status: experiment prepared; database measurements have **not** been run. The result directory is intentionally empty and will be created by the runner. No benchmark timings are claimed here.
+Status: the 100,000-row experiment completed on 2026-10-01 with PostgreSQL 17.11 and MySQL 8.4.11. All full-table and query fingerprints passed. See the [result report and raw evidence](result/2026-10-01-postgresql17-mysql84-darwin-arm64.md).
 
 ## Story
 
@@ -98,7 +98,7 @@ The runner aborts on a checksum, root loop-count or PostgreSQL root row-count mi
 
 The two reported time fields are **not identical instruments**: PG reports overall Execution Time; MySQL reports the root iterator's last-row time. Both include instrumentation overhead, while MySQL's field has a different scope. Raw plans and the measurement name are retained. No docker-exec/process startup wall time is mislabeled as SQL latency. Neither measurement is application/network end-to-end latency. Do not derive a precise cross-engine speedup from these fields; use them primarily for within-engine contrasts and plan interpretation.
 
-## Predictions, to test rather than quote as results
+## Predictions tested in the first run
 
 - Shuffling is likely to spread PG's qualifying heap rows over more pages for the same PK range; a bitmap path may mitigate repeated heap page visits
 - InnoDB's primary range can traverse ordered clustered leaves containing payload, although shuffled insertion can produce different occupancy and fragmentation
@@ -106,7 +106,13 @@ The two reported time fields are **not identical instruments**: PG reports overa
 - A covering secondary read may reduce row-fetch work in both engines; PG Heap Fetches must be checked
 - With 100k rows and warmed memory, wall-clock differences may be small or noisy even when access paths differ
 
-These are hypotheses. Offline unit tests cover deterministic generation, result fingerprints and synthetic plan-parser fixtures. Actual database loading, plans, timings and runtime compatibility remain unverified until the first run. No generated inputs, validation reports or measured results are checked into `result/`.
+The [first result report](result/2026-10-01-postgresql17-mysql84-darwin-arm64.md) records these observations under the default 100k-row matrix:
+
+- PostgreSQL's PK range changed from Index Scan after ascending insertion to Bitmap Heap Scan after shuffled insertion. Shared buffer hits rose from 46 to 888, including 879 exact heap blocks in the shuffled plan; median Execution Time rose from 0.2135 to 1.3800 ms. All measured PostgreSQL plans had zero shared reads.
+- MySQL used a PRIMARY range scan for both insertion orders. Its root last-row median was 0.1650 ms ascending and 0.1955 ms shuffled. Estimated clustered storage was larger after shuffled insertion (49.58 versus 30.56 MiB).
+- PostgreSQL covering reads had zero Heap Fetches in all measured samples, using 4–5 shared hits instead of 101–104 for secondary payload reads. MySQL reported covering index lookups with lower times than its non-covering lookups.
+
+The evidence supports locality and covering-index explanations in this warmed, read-only run. PostgreSQL and MySQL use different timing instruments; these figures are not a cross-engine speedup comparison. All 120 measured samples, 36 warmup plans, fingerprints, and runtime metadata are retained in `result/2026-10-01-100k/`. The large generated load SQL stays in ignored local run directories. Four offline unit tests also passed; larger row counts and write/concurrency scenarios remain unmeasured.
 
 ## Boundaries and common misconceptions
 
